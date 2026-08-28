@@ -1,0 +1,91 @@
+using DanhGiaAPI.Common;
+using DanhGiaAPI.DTOs.LuongKy;
+using DanhGiaAPI.Entities;
+using DanhGiaAPI.Repositories.Interfaces;
+using DanhGiaAPI.Services.Interfaces;
+using Microsoft.AspNetCore.Http;
+
+namespace DanhGiaAPI.Services
+{
+    public class MauLuongKyService : IMauLuongKyService
+    {
+        private readonly IMauLuongKyRepository _mauLuongKyRepository;
+        private readonly IUnitOfWork _unitOfWork;
+
+        public MauLuongKyService(IMauLuongKyRepository mauLuongKyRepository, IUnitOfWork unitOfWork)
+        {
+            _mauLuongKyRepository = mauLuongKyRepository;
+            _unitOfWork = unitOfWork;
+        }
+
+        public async Task<List<MauLuongKy>> DanhSachAsync(string? loaiPhieu)
+        {
+            var query = _mauLuongKyRepository.Query();
+
+            if (!string.IsNullOrWhiteSpace(loaiPhieu))
+                query = query.Where(x => x.LoaiPhieu == loaiPhieu);
+
+            return query.OrderBy(x => x.LoaiPhieu).ThenBy(x => x.BuocThuTu).ToList();
+        }
+
+        public async Task<MauLuongKy> ChiTietAsync(int id)
+        {
+            return await _mauLuongKyRepository.GetByIdAsync(id)
+                ?? throw new ApiException("Không tìm thấy bước trong luồng ký", StatusCodes.Status404NotFound);
+        }
+
+        public async Task<MauLuongKy> ThemAsync(MauLuongKyRequest request)
+        {
+            KiemTraLoaiNguoiKy(request);
+
+            var mau = new MauLuongKy
+            {
+                LoaiPhieu = request.LoaiPhieu.Trim(),
+                BuocThuTu = request.BuocThuTu,
+                TenBuoc = request.TenBuoc.Trim(),
+                LoaiNguoiKy = request.LoaiNguoiKy.Trim(),
+                PhongBanId = request.PhongBanId,
+                VaiTroId = request.VaiTroId,
+                BatBuoc = request.BatBuoc
+            };
+            await _mauLuongKyRepository.AddAsync(mau);
+            await _unitOfWork.SaveChangesAsync();
+            return mau;
+        }
+
+        public async Task<MauLuongKy> SuaAsync(int id, MauLuongKyRequest request)
+        {
+            KiemTraLoaiNguoiKy(request);
+
+            var mau = await _mauLuongKyRepository.GetByIdAsync(id)
+                ?? throw new ApiException("Không tìm thấy bước trong luồng ký", StatusCodes.Status404NotFound);
+
+            mau.LoaiPhieu = request.LoaiPhieu.Trim();
+            mau.BuocThuTu = request.BuocThuTu;
+            mau.TenBuoc = request.TenBuoc.Trim();
+            mau.LoaiNguoiKy = request.LoaiNguoiKy.Trim();
+            mau.PhongBanId = request.PhongBanId;
+            mau.VaiTroId = request.VaiTroId;
+            mau.BatBuoc = request.BatBuoc;
+            await _unitOfWork.SaveChangesAsync();
+            return mau;
+        }
+
+        public async Task XoaAsync(int id)
+        {
+            var mau = await _mauLuongKyRepository.GetByIdAsync(id)
+                ?? throw new ApiException("Không tìm thấy bước trong luồng ký", StatusCodes.Status404NotFound);
+
+            _mauLuongKyRepository.Remove(mau);
+            await _unitOfWork.SaveChangesAsync();
+        }
+
+        private static readonly string[] LoaiNguoiKyHopLe = { "PHONG_BAN", "NHA_THAU", "VAI_TRO" };
+
+        private static void KiemTraLoaiNguoiKy(MauLuongKyRequest request)
+        {
+            if (!LoaiNguoiKyHopLe.Contains(request.LoaiNguoiKy.Trim()))
+                throw new ApiException("LoaiNguoiKy phải là PHONG_BAN, NHA_THAU hoặc VAI_TRO");
+        }
+    }
+}

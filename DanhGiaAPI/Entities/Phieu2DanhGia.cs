@@ -11,7 +11,9 @@ namespace DanhGiaAPI.Entities
         public int Nam { get; set; }
         public int NhaThauId { get; set; }
         public int? BepAnId { get; set; }
-        public int NhaAnId { get; set; }
+        // Danh sách Nhà ăn của phiếu này nằm ở bảng liên kết Phieu2_NhaAn (N-N,
+        // xem Entities/Phieu2NhaAn.cs) — 1 phiếu có thể gộp nhiều nhà ăn, KHÔNG
+        // còn là 1 cột scalar ở đây.
         public DateTime? ThoiGianTu { get; set; }
         public DateTime? ThoiGianDen { get; set; }
         public string? DiaDiem { get; set; }

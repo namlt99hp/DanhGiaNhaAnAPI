@@ -14,6 +14,7 @@ namespace DanhGiaAPI.Services
     {
         private readonly INguoiDungRepository _nguoiDungRepository;
         private readonly INguoiDungVaiTroRepository _nguoiDungVaiTroRepository;
+        private readonly IVaiTroRepository _vaiTroRepository;
         private readonly IPhienDangNhapRepository _phienDangNhapRepository;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IConfiguration _configuration;
@@ -21,12 +22,14 @@ namespace DanhGiaAPI.Services
         public AuthService(
             INguoiDungRepository nguoiDungRepository,
             INguoiDungVaiTroRepository nguoiDungVaiTroRepository,
+            IVaiTroRepository vaiTroRepository,
             IPhienDangNhapRepository phienDangNhapRepository,
             IUnitOfWork unitOfWork,
             IConfiguration configuration)
         {
             _nguoiDungRepository = nguoiDungRepository;
             _nguoiDungVaiTroRepository = nguoiDungVaiTroRepository;
+            _vaiTroRepository = vaiTroRepository;
             _phienDangNhapRepository = phienDangNhapRepository;
             _unitOfWork = unitOfWork;
             _configuration = configuration;
@@ -41,6 +44,12 @@ namespace DanhGiaAPI.Services
 
             if (!string.IsNullOrWhiteSpace(request.Email) && await _nguoiDungRepository.TonTaiEmailAsync(request.Email))
                 throw new AuthException("Email đã được sử dụng");
+
+            // Tài khoản chỉ được thuộc 1 trong 2: Phòng ban (nội bộ) hoặc Nhà
+            // thầu — cần cho đúng nhánh PHONG_BAN/NHA_THAU ở
+            // ChuKyPhieuService.KiemTraQuyenKyAsync (xem VaiTro.md).
+            if (request.PhongBanId.HasValue && request.NhaThauId.HasValue)
+                throw new AuthException("Tài khoản chỉ được thuộc 1 trong 2: Phòng ban hoặc Nhà thầu, không được cả hai");
 
             var nguoiDung = new NguoiDung
             {
@@ -75,9 +84,10 @@ namespace DanhGiaAPI.Services
 
             var vaiTroCuaNguoiDung = await _nguoiDungVaiTroRepository.GetVaiTroCuaNguoiDungAsync(nguoiDung.Id);
             var maVaiTro = vaiTroCuaNguoiDung.Select(x => x.Ma).ToList();
-            var coQuyenDuyetTk = vaiTroCuaNguoiDung.Any(x => x.CoQuyenDuyetTk);
+            var laAdmin = vaiTroCuaNguoiDung.Any(x => x.LaQuanTriVien);
+            var maQuyen = await _vaiTroRepository.GetMaQuyenChoNhieuVaiTroAsync(vaiTroCuaNguoiDung.Select(x => x.Id).ToList());
 
-            var (token, hetHan) = TaoToken(nguoiDung, maVaiTro, coQuyenDuyetTk);
+            var (token, hetHan) = TaoToken(nguoiDung, maVaiTro, laAdmin, maQuyen);
 
             await _phienDangNhapRepository.AddAsync(new PhienDangNhap
             {
@@ -102,7 +112,9 @@ namespace DanhGiaAPI.Services
                     PhongBanId = nguoiDung.PhongBanId,
                     NhaThauId = nguoiDung.NhaThauId,
                     TrangThai = nguoiDung.TrangThai,
-                    DanhSachVaiTro = maVaiTro
+                    DanhSachVaiTro = maVaiTro,
+                    LaAdmin = laAdmin,
+                    DanhSachQuyen = maQuyen
                 }
             };
         }
@@ -119,7 +131,7 @@ namespace DanhGiaAPI.Services
 
         // Sinh JWT thủ công thay vì dùng DB default cho NgayHetHan để controller/service
         // luôn có sẵn giá trị hết hạn trả về FE mà không cần round-trip đọc lại DB.
-        private (string token, DateTime hetHan) TaoToken(NguoiDung nguoiDung, List<string> maVaiTro, bool coQuyenDuyetTk)
+        private (string token, DateTime hetHan) TaoToken(NguoiDung nguoiDung, List<string> maVaiTro, bool laAdmin, List<string> maQuyen)
         {
             var jwtSection = _configuration.GetSection("Jwt");
             var key = jwtSection["Key"]!;
@@ -142,11 +154,13 @@ namespace DanhGiaAPI.Services
 
             claims.AddRange(maVaiTro.Select(ma => new Claim(ClaimTypes.Role, ma)));
 
-            // Claim này quyết định quyền duyệt tài khoản (policy "DuyetTaiKhoan"
-            // trong Program.cs) — tính từ VaiTro.CoQuyenDuyetTk = 1 bất kỳ, không
-            // hard-code riêng vai trò ADMIN.
-            if (coQuyenDuyetTk)
-                claims.Add(new Claim("co_quyen_duyet_tk", "1"));
+            // "admin": bypass TOÀN BỘ policy quyền (xem CoQuyen() trong
+            // Program.cs) — tính từ VaiTro.LaQuanTriVien = 1 bất kỳ, không
+            // hard-code riêng vai trò ADMIN. "quyen": 1 claim cho mỗi mã quyền
+            // vai trò của người dùng được gán qua VaiTroQuyen.
+            if (laAdmin)
+                claims.Add(new Claim("admin", "1"));
+            claims.AddRange(maQuyen.Select(ma => new Claim("quyen", ma)));
 
             var hetHan = DateTime.Now.AddMinutes(expiryMinutes);
             var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));

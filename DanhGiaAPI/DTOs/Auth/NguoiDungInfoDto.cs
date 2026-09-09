@@ -10,5 +10,7 @@ namespace DanhGiaAPI.DTOs.Auth
         public int? NhaThauId { get; set; }
         public string TrangThai { get; set; } = null!;
         public List<string> DanhSachVaiTro { get; set; } = new();
+        public bool LaAdmin { get; set; }
+        public List<string> DanhSachQuyen { get; set; } = new();
     }
 }

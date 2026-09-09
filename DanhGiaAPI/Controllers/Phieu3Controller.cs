@@ -1,12 +1,15 @@
+using DanhGiaAPI.Common;
 using DanhGiaAPI.DTOs.Phieu3;
 using DanhGiaAPI.Extensions;
 using DanhGiaAPI.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DanhGiaAPI.Controllers
 {
-    // Dữ liệu nghiệp vụ nội bộ — toàn bộ action yêu cầu đăng nhập.
+    // Dữ liệu nghiệp vụ nội bộ — toàn bộ action yêu cầu đăng nhập. Tài khoản
+    // nhà thầu chỉ thấy báo cáo của chính nhà thầu đó — xem GetNhaThauId().
     [Authorize]
     [Route("api/phieu3")]
     [ApiController]
@@ -19,6 +22,15 @@ namespace DanhGiaAPI.Controllers
             _phieu3Service = phieu3Service;
         }
 
+        // Phiếu 3 không có bước ký nào dành cho nhà thầu (chỉ xem + gửi ý
+        // kiến phản hồi, xem huongdanquanlytaikhoan.md mục 5.1) — không được
+        // TẠO phiếu mới.
+        private void ChanTaoPhieuNhaThau()
+        {
+            if (User.GetNhaThauId().HasValue)
+                throw new ApiException("Tài khoản nhà thầu không có quyền tạo phiếu mới", StatusCodes.Status403Forbidden);
+        }
+
         // GET api/phieu3?nhaThauId=&thang=&nam=&trangThai=
         [HttpGet]
         public async Task<IActionResult> DanhSach(
@@ -27,20 +39,21 @@ namespace DanhGiaAPI.Controllers
             [FromQuery] int? nam,
             [FromQuery] string? trangThai)
         {
-            return Ok(await _phieu3Service.DanhSachAsync(nhaThauId, thang, nam, trangThai));
+            return Ok(await _phieu3Service.DanhSachAsync(nhaThauId, thang, nam, trangThai, User.GetNhaThauId()));
         }
 
         // GET api/phieu3/5
         [HttpGet("{id}")]
         public async Task<IActionResult> ChiTiet(int id)
         {
-            return Ok(await _phieu3Service.ChiTietAsync(id));
+            return Ok(await _phieu3Service.ChiTietAsync(id, User.GetNhaThauId()));
         }
 
         // POST api/phieu3 — tạo phiếu + tự động tính Bảng 1 + khởi tạo khung Bảng 2
         [HttpPost]
         public async Task<IActionResult> Them([FromBody] Phieu3Request request)
         {
+            ChanTaoPhieuNhaThau();
             return Ok(await _phieu3Service.ThemAsync(request, User.GetNguoiDungId()));
         }
 

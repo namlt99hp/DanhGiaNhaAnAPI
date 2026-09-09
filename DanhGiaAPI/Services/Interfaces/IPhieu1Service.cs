@@ -5,9 +5,12 @@ namespace DanhGiaAPI.Services.Interfaces
 {
     public interface IPhieu1Service
     {
-        Task<List<Phieu1KiemTra>> DanhSachAsync(int? bepAnId, int? phongBanId, int? nhaThauId, string? trangThai, DateTime? tuNgay, DateTime? denNgay);
-        Task<Phieu1ResponseDto> ChiTietAsync(int id);
-        Task<Phieu1ResponseDto> ThemAsync(Phieu1Request request, int? nguoiTaoId);
+        // nhaThauCuaNguoiGoi: NULL với tài khoản nội bộ (không lọc); có giá trị
+        // với tài khoản nhà thầu -> ép lọc về đúng nhà thầu đó, bỏ qua nhaThauId
+        // truyền vào nếu khác (xem DangNhap.md).
+        Task<List<Phieu1KiemTra>> DanhSachAsync(int? bepAnId, int? phongBanId, int? nhaThauId, string? trangThai, DateTime? tuNgay, DateTime? denNgay, int? nhaThauCuaNguoiGoi);
+        Task<Phieu1ResponseDto> ChiTietAsync(int id, int? nhaThauCuaNguoiGoi);
+        Task<Phieu1ResponseDto> ThemAsync(Phieu1Request request, int? nguoiTaoId, bool laAdmin);
         Task<Phieu1ResponseDto> SuaAsync(int id, Phieu1Request request);
         Task XoaAsync(int id);
 

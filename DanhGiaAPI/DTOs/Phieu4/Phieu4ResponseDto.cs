@@ -14,6 +14,10 @@ namespace DanhGiaAPI.DTOs.Phieu4
         public string? CongThuc { get; set; }
         public int? TieuChiId { get; set; }
         public int? NhomTieuChiId { get; set; }
+        public int? DiaDiemNhaAnId { get; set; }
+        public int? NhaThauId { get; set; }
+        public decimal? GiaTriChung { get; set; }
+        public bool ChinhSuaThuCong { get; set; }
         public List<Phieu4GiaTri> GiaTri { get; set; } = new();
     }
 

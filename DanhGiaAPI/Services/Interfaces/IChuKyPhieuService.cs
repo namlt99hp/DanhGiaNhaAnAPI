@@ -1,3 +1,4 @@
+using DanhGiaAPI.DTOs.LuongKy;
 using DanhGiaAPI.Entities;
 
 namespace DanhGiaAPI.Services.Interfaces
@@ -17,7 +18,18 @@ namespace DanhGiaAPI.Services.Interfaces
         // cơ chế tự động 2 chiều, vì mỗi Phiếu có bảng riêng).
         Task<string> TrangThaiTongAsync(string loaiPhieu, int doiTuongId);
 
-        Task<ChuKyPhieu> KyAsync(int id, int nguoiKyId, int? chuKyId, string? ghiChu);
+        // nguoiKyThayId: tùy chọn — ký thay cho người khác (phải cùng đủ điều
+        // kiện ký bước này). NULL = ký cho chính nguoiKyId (mặc định).
+        Task<ChuKyPhieu> KyAsync(int id, int nguoiKyId, int? chuKyId, string? ghiChu, int? nguoiKyThayId);
         Task<ChuKyPhieu> TuChoiAsync(int id, int nguoiKyId, string ghiChu);
+
+        // Chỉ định/đổi người ký dự kiến cho 1 bước còn CHO_KY — cả người thực
+        // hiện (nguoiThucHienId) lẫn người được chỉ định (nguoiKyDuKienId) đều
+        // phải tự đủ điều kiện ký đúng bước đó (xem VaiTro.md/LuongTrinhKy.md).
+        Task<ChuKyPhieu> DatNguoiKyDuKienAsync(int id, int nguoiThucHienId, int nguoiKyDuKienId);
+
+        // Danh sách người đủ điều kiện ký 1 bước cụ thể (dùng cho dropdown FE
+        // "chỉ định người ký" / "ký thay").
+        Task<List<NguoiKyKhaDungDto>> DanhSachNguoiKyKhaDungAsync(int id);
     }
 }

@@ -12,6 +12,7 @@ namespace DanhGiaAPI.DTOs.QuanLyTaiKhoan
         [MaxLength(255)]
         public string Ten { get; set; } = null!;
 
-        public bool CoQuyenDuyetTk { get; set; }
+        public bool LaQuanTriVien { get; set; }
+        public List<int> QuyenIds { get; set; } = new();
     }
 }

@@ -20,10 +20,14 @@ namespace DanhGiaAPI.Models
         // Module đánh giá bếp ăn (mới) — xem 02. Phantich/schema_module_danh_gia_nha_an.sql
         // Entity nằm ở DanhGiaAPI.Entities (tách khỏi Models cũ), truy cập qua Repository.
         public DbSet<VaiTro> VaiTro { get; set; }
+        public DbSet<Quyen> Quyen { get; set; }
+        public DbSet<VaiTroQuyen> VaiTroQuyen { get; set; }
         public DbSet<PhongBan> PhongBan { get; set; }
         public DbSet<NhaThau> NhaThau { get; set; }
         public DbSet<NguoiDung> NguoiDung { get; set; }
         public DbSet<NguoiDungVaiTro> NguoiDungVaiTro { get; set; }
+        public DbSet<NguoiDungMauLuongKy> NguoiDungMauLuongKy { get; set; }
+        public DbSet<NguoiDungPhieuQuyen> NguoiDungPhieuQuyen { get; set; }
         public DbSet<PhienDangNhap> PhienDangNhap { get; set; }
         public DbSet<ChuKyNguoiDung> ChuKyNguoiDung { get; set; }
         public DbSet<BepAn> BepAn { get; set; }
@@ -50,6 +54,9 @@ namespace DanhGiaAPI.Models
         public DbSet<Phieu2TieuChi> Phieu2TieuChi { get; set; }
         public DbSet<Phieu2KetQua> Phieu2KetQua { get; set; }
         public DbSet<Phieu2YKienNhaThau> Phieu2YKienNhaThau { get; set; }
+        // Liên kết N-N Phiếu 2 <-> Nhà ăn — 1 phiếu có thể gộp nhiều nhà ăn
+        // (xem Entities/Phieu2NhaAn.cs).
+        public DbSet<Phieu2NhaAn> Phieu2NhaAn { get; set; }
 
         // Giai đoạn 5 — Phiếu (3): Báo cáo chất lượng dịch vụ suất ăn theo tháng (xem
         // 02. Phantich/modules/Phieu3_BaoCaoThang.md)
@@ -70,6 +77,9 @@ namespace DanhGiaAPI.Models
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<NguoiDungVaiTro>().HasKey(x => new { x.NguoiDungId, x.VaiTroId });
+            modelBuilder.Entity<VaiTroQuyen>().HasKey(x => new { x.VaiTroId, x.QuyenId });
+            modelBuilder.Entity<NguoiDungMauLuongKy>().HasKey(x => new { x.NguoiDungId, x.MauLuongKyId });
+            modelBuilder.Entity<NguoiDungPhieuQuyen>().HasKey(x => new { x.NguoiDungId, x.LoaiPhieu });
 
             // Tên bảng có "_" (Phieu1_..., Phieu2_..., xem schema_module_danh_gia_nha_an.sql) khác
             // convention đặt tên entity C# (PascalCase liền, không "_") nên cần khai báo
@@ -83,6 +93,7 @@ namespace DanhGiaAPI.Models
             modelBuilder.Entity<Phieu2TieuChi>().ToTable("Phieu2_TieuChi");
             modelBuilder.Entity<Phieu2KetQua>().ToTable("Phieu2_KetQua");
             modelBuilder.Entity<Phieu2YKienNhaThau>().ToTable("Phieu2_YKienNhaThau");
+            modelBuilder.Entity<Phieu2NhaAn>().ToTable("Phieu2_NhaAn");
 
             modelBuilder.Entity<Phieu3BaoCao>().ToTable("Phieu3_BaoCao");
             modelBuilder.Entity<Phieu3Bang1Dong>().ToTable("Phieu3_Bang1Dong");

@@ -8,6 +8,15 @@ namespace DanhGiaAPI.Entities
         public int BuocThuTu { get; set; }
         public string? TenBuoc { get; set; }
         public int? NguoiKyId { get; set; }
+
+        // Chỉ định trước (tùy chọn) — khi có giá trị, CHỈ đúng người này được
+        // ghi nhận là người ký bước này (ràng buộc cứng, xem
+        // ChuKyPhieuService.KyAsync/TuChoiAsync) — cho phép người khác cùng đủ
+        // điều kiện "ký thay" (NguoiKyId cuối cùng vẫn phải khớp cột này) thay
+        // vì bắt đúng người đó phải tự đăng nhập. Đặt/đổi được bất kỳ lúc nào
+        // khi bước còn CHO_KY. Xem 02. Phantich/modules/LuongTrinhKy.md.
+        public int? NguoiKyDuKienId { get; set; }
+
         public int? ChuKyId { get; set; }
         public string TrangThai { get; set; } = "CHO_KY"; // CHO_KY, DA_DUYET, TU_CHOI
         public string? GhiChu { get; set; }

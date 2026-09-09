@@ -6,7 +6,10 @@ namespace DanhGiaAPI.DTOs.Phieu2
         public int Nam { get; set; }
         public int NhaThauId { get; set; }
         public int? BepAnId { get; set; }
-        public int NhaAnId { get; set; }
+        // 1 phiếu có thể gộp nhiều nhà ăn của cùng bếp ăn (đánh giá 1 lần cho
+        // nhiều nhà ăn) — chọn tự do, không ràng buộc theo BepAnId (xem
+        // Phieu2Service.KiemTraNhaAnAsync).
+        public List<int> NhaAnIds { get; set; } = new();
         public DateTime? ThoiGianTu { get; set; }
         public DateTime? ThoiGianDen { get; set; }
         public string? DiaDiem { get; set; }

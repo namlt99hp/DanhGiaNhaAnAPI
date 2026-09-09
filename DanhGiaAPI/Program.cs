@@ -5,6 +5,7 @@ using DanhGiaAPI.Repositories.Interfaces;
 using DanhGiaAPI.Services;
 using DanhGiaAPI.Services.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
@@ -47,6 +48,8 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // interface riêng để thêm method truy vấn đặc thù khi cần.
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<IVaiTroRepository, VaiTroRepository>();
+builder.Services.AddScoped<IQuyenRepository, QuyenRepository>();
+builder.Services.AddScoped<IVaiTroQuyenRepository, VaiTroQuyenRepository>();
 builder.Services.AddScoped<IPhongBanRepository, PhongBanRepository>();
 builder.Services.AddScoped<INhaThauRepository, NhaThauRepository>();
 builder.Services.AddScoped<IBepAnRepository, BepAnRepository>();
@@ -54,6 +57,8 @@ builder.Services.AddScoped<IDiaDiemNhaAnRepository, DiaDiemNhaAnRepository>();
 builder.Services.AddScoped<IKetQuaDanhGiaRepository, KetQuaDanhGiaRepository>();
 builder.Services.AddScoped<INguoiDungRepository, NguoiDungRepository>();
 builder.Services.AddScoped<INguoiDungVaiTroRepository, NguoiDungVaiTroRepository>();
+builder.Services.AddScoped<INguoiDungMauLuongKyRepository, NguoiDungMauLuongKyRepository>();
+builder.Services.AddScoped<INguoiDungPhieuQuyenRepository, NguoiDungPhieuQuyenRepository>();
 builder.Services.AddScoped<IPhienDangNhapRepository, PhienDangNhapRepository>();
 builder.Services.AddScoped<IChuKyNguoiDungRepository, ChuKyNguoiDungRepository>();
 builder.Services.AddScoped<INhomTieuChiRepository, NhomTieuChiRepository>();
@@ -69,6 +74,7 @@ builder.Services.AddScoped<IPhieu2DanhGiaRepository, Phieu2DanhGiaRepository>();
 builder.Services.AddScoped<IPhieu2TieuChiRepository, Phieu2TieuChiRepository>();
 builder.Services.AddScoped<IPhieu2KetQuaRepository, Phieu2KetQuaRepository>();
 builder.Services.AddScoped<IPhieu2YKienNhaThauRepository, Phieu2YKienNhaThauRepository>();
+builder.Services.AddScoped<IPhieu2NhaAnRepository, Phieu2NhaAnRepository>();
 builder.Services.AddScoped<IPhieu3BaoCaoRepository, Phieu3BaoCaoRepository>();
 builder.Services.AddScoped<IPhieu3Bang1DongRepository, Phieu3Bang1DongRepository>();
 builder.Services.AddScoped<IPhieu3Bang2DongRepository, Phieu3Bang2DongRepository>();
@@ -79,14 +85,18 @@ builder.Services.AddScoped<IPhieu4NhaThauRepository, Phieu4NhaThauRepository>();
 builder.Services.AddScoped<IPhieu4BangRepository, Phieu4BangRepository>();
 builder.Services.AddScoped<IPhieu4DongRepository, Phieu4DongRepository>();
 builder.Services.AddScoped<IPhieu4GiaTriRepository, Phieu4GiaTriRepository>();
+builder.Services.AddScoped<IDuLieuComRepository, DuLieuComRepository>();
 
 // Đăng ký Service cho module đăng nhập/quản lý tài khoản/danh mục
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<INguoiDungService, NguoiDungService>();
 builder.Services.AddScoped<IChuKyService, ChuKyService>();
 builder.Services.AddScoped<IVaiTroService, VaiTroService>();
+builder.Services.AddScoped<IQuyenService, QuyenService>();
+builder.Services.AddScoped<IQuanTriGuardService, QuanTriGuardService>();
 builder.Services.AddScoped<IPhongBanService, PhongBanService>();
 builder.Services.AddScoped<IBepAnService, BepAnService>();
+builder.Services.AddScoped<IDiaDiemNhaAnService, DiaDiemNhaAnService>();
 builder.Services.AddScoped<INhaThauService, NhaThauService>();
 builder.Services.AddScoped<INhomTieuChiService, NhomTieuChiService>();
 builder.Services.AddScoped<ITieuChiService, TieuChiService>();
@@ -137,11 +147,22 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-// Policy "DuyetTaiKhoan": người có claim co_quyen_duyet_tk (bất kỳ vai trò nào
-// bật VaiTro.CoQuyenDuyetTk = 1) — xem modules/QuanLyTaiKhoan.md.
+// Mô hình quyền: mỗi policy dưới đây khớp 1 dòng Quyen.Ma (xem
+// modules/VaiTro.md). Một tài khoản thỏa policy nếu có claim "admin"=1 (bất kỳ
+// vai trò nào bật VaiTro.LaQuanTriVien = 1 — bypass TẤT CẢ, không hard-code
+// riêng vai trò ADMIN) HOẶC có claim "quyen" đúng mã tương ứng (gán qua
+// VaiTroQuyen).
+static bool CoQuyen(AuthorizationHandlerContext ctx, string ma) =>
+    ctx.User.HasClaim("admin", "1") || ctx.User.HasClaim("quyen", ma);
+
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("DuyetTaiKhoan", policy => policy.RequireClaim("co_quyen_duyet_tk", "1"));
+    options.AddPolicy("QuanLyTaiKhoan", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_TAI_KHOAN")));
+    options.AddPolicy("QuanLyVaiTro", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_VAI_TRO")));
+    options.AddPolicy("QuanLyPhongBan", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_PHONG_BAN")));
+    options.AddPolicy("QuanLyDanhMuc", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_DANH_MUC")));
+    options.AddPolicy("QuanLyTieuChi", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_TIEU_CHI")));
+    options.AddPolicy("QuanLyLuongKy", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_LUONG_KY")));
 });
 
 builder.Services.AddControllers();
@@ -177,7 +198,11 @@ app.Use(async (context, next) =>
 app.UseSwagger();
 app.UseSwaggerUI();
 
-app.UseHttpsRedirection();
+// Bỏ UseHttpsRedirection() theo yêu cầu — dev chỉ dùng http (cổng 5056), không
+// cần https (7141) nữa. Trước đây bật middleware này từng gây lỗi 401 khó hiểu:
+// FE gọi http bị BE redirect 307 sang https, trình duyệt follow redirect
+// (đổi cổng = đổi origin) tự bỏ header Authorization của mọi request có token
+// — xem lịch sử sự cố ở modules/DangNhap.md.
 app.UseStaticFiles(); // phục vụ ảnh chữ ký đã upload ở wwwroot/uploads/chu-ky
 
 app.UseAuthentication();

@@ -36,7 +36,7 @@ namespace DanhGiaAPI.Controllers
         [HttpPost("{id}/ky")]
         public async Task<IActionResult> Ky(int id, [FromBody] KyPhieuRequest request)
         {
-            return Ok(await _chuKyPhieuService.KyAsync(id, User.GetNguoiDungId(), request.ChuKyId, request.GhiChu));
+            return Ok(await _chuKyPhieuService.KyAsync(id, User.GetNguoiDungId(), request.ChuKyId, request.GhiChu, request.NguoiKyThayId));
         }
 
         // POST api/chu-ky-phieu/5/tu-choi
@@ -44,6 +44,22 @@ namespace DanhGiaAPI.Controllers
         public async Task<IActionResult> TuChoi(int id, [FromBody] TuChoiPhieuRequest request)
         {
             return Ok(await _chuKyPhieuService.TuChoiAsync(id, User.GetNguoiDungId(), request.GhiChu));
+        }
+
+        // PUT api/chu-ky-phieu/5/nguoi-ky-du-kien — chỉ định/đổi người ký dự
+        // kiến cho 1 bước còn CHO_KY (xem 02. Phantich/huongdanquanlytaikhoan.md mục 5.1).
+        [HttpPut("{id}/nguoi-ky-du-kien")]
+        public async Task<IActionResult> DatNguoiKyDuKien(int id, [FromBody] DatNguoiKyDuKienRequest request)
+        {
+            return Ok(await _chuKyPhieuService.DatNguoiKyDuKienAsync(id, User.GetNguoiDungId(), request.NguoiKyDuKienId));
+        }
+
+        // GET api/chu-ky-phieu/5/nguoi-ky-kha-dung — danh sách người đủ điều
+        // kiện ký bước này, dùng cho dropdown "chỉ định người ký"/"ký thay".
+        [HttpGet("{id}/nguoi-ky-kha-dung")]
+        public async Task<IActionResult> DanhSachNguoiKyKhaDung(int id)
+        {
+            return Ok(await _chuKyPhieuService.DanhSachNguoiKyKhaDungAsync(id));
         }
     }
 }

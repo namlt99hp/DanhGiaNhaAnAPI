@@ -8,5 +8,6 @@ namespace DanhGiaAPI.Repositories.Interfaces
     // nghiệp vụ 2026-08-27, xem modules/Phieu2_DanhGiaSuatAn.md).
     public interface IDiaDiemNhaAnRepository : IRepository<DiaDiemNhaAn>
     {
+        Task<DiaDiemNhaAn?> GetByTenAsync(string diaDiem);
     }
 }

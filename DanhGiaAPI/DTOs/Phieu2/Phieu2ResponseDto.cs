@@ -10,6 +10,6 @@ namespace DanhGiaAPI.DTOs.Phieu2
         public Phieu2YKienNhaThau? YKienNhaThau { get; set; }
         public Phieu1KiemTra? Phieu1 { get; set; }
         public Phieu1KetLuan? Phieu1KetLuan { get; set; }
-        public global::DanhGiaAPI.Models.DiaDiemNhaAn? NhaAn { get; set; }
+        public List<global::DanhGiaAPI.Models.DiaDiemNhaAn> DanhSachNhaAn { get; set; } = new();
     }
 }

@@ -52,3 +52,8 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Visual Studio cache/options (bin/obj đã ignore ở trên nhưng đang bị track
+# sẵn từ trước — cần "git rm -r --cached" 1 lần để gỡ khỏi index, xem ghi chú
+# trong PR/commit thêm .gitignore này)
+.vs/

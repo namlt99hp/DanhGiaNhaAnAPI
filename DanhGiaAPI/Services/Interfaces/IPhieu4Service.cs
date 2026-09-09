@@ -20,6 +20,12 @@ namespace DanhGiaAPI.Services.Interfaces
         // lại Bảng 1 ngay để cột mới có dữ liệu tự động như các cột khác.
         Task<Phieu4ResponseDto> ThemNhaThauAsync(int id, int nhaThauId);
 
+        // Xóa 1 cột nhà thầu khỏi phiếu đã lập (chỉ khi NHAP/TU_CHOI, phải còn
+        // lại ít nhất 1 nhà thầu) — xóa toàn bộ ô giá trị (Bảng 1-3) của nhà
+        // thầu này ở mọi dòng, kèm dòng Bảng 5 gắn cứng với nhà thầu này
+        // (Phieu4Dong.NhaThauId).
+        Task<Phieu4ResponseDto> XoaNhaThauAsync(int id, int nhaThauId);
+
         // Tính lại Bảng 1 (nhóm 2/3/4) từ Phieu2_DanhGia trong khoảng ngày —
         // CHỈ ghi đè các ô CHƯA bị sửa tay (ChinhSuaThuCong = false).
         Task<Phieu4ResponseDto> TinhLaiAsync(int id);

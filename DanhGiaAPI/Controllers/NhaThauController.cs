@@ -31,7 +31,7 @@ namespace DanhGiaAPI.Controllers
         }
 
         // POST api/nha-thau
-        [Authorize(Policy = "DuyetTaiKhoan")]
+        [Authorize(Policy = "QuanLyDanhMuc")]
         [HttpPost]
         public async Task<IActionResult> Them([FromBody] NhaThauRequest request)
         {
@@ -39,7 +39,7 @@ namespace DanhGiaAPI.Controllers
         }
 
         // PUT api/nha-thau/5
-        [Authorize(Policy = "DuyetTaiKhoan")]
+        [Authorize(Policy = "QuanLyDanhMuc")]
         [HttpPut("{id}")]
         public async Task<IActionResult> Sua(int id, [FromBody] NhaThauRequest request)
         {
@@ -47,7 +47,7 @@ namespace DanhGiaAPI.Controllers
         }
 
         // DELETE api/nha-thau/5
-        [Authorize(Policy = "DuyetTaiKhoan")]
+        [Authorize(Policy = "QuanLyDanhMuc")]
         [HttpDelete("{id}")]
         public async Task<IActionResult> Xoa(int id)
         {

@@ -1,13 +1,15 @@
+using DanhGiaAPI.Common;
 using DanhGiaAPI.DTOs.Phieu2;
 using DanhGiaAPI.Extensions;
 using DanhGiaAPI.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DanhGiaAPI.Controllers
 {
-    // Dữ liệu nghiệp vụ nội bộ — toàn bộ action yêu cầu đăng nhập.
-    // Lọc theo NhaThauId của người dùng hiện tại CHƯA làm — xem DangNhap.md.
+    // Dữ liệu nghiệp vụ nội bộ — toàn bộ action yêu cầu đăng nhập. Tài khoản
+    // nhà thầu chỉ thấy phiếu của chính nhà thầu đó — xem GetNhaThauId().
     [Authorize]
     [Route("api/phieu2")]
     [ApiController]
@@ -20,6 +22,15 @@ namespace DanhGiaAPI.Controllers
             _phieu2Service = phieu2Service;
         }
 
+        // Nhà thầu chỉ ký/xem/gửi ý kiến phản hồi Phiếu 2 của chính mình —
+        // không được TẠO phiếu mới (việc lập phiếu đánh giá là của phòng ban
+        // nội bộ, nhà thầu chỉ ký bước 1 sau khi phiếu đã được lập).
+        private void ChanTaoPhieuNhaThau()
+        {
+            if (User.GetNhaThauId().HasValue)
+                throw new ApiException("Tài khoản nhà thầu không có quyền tạo phiếu mới", StatusCodes.Status403Forbidden);
+        }
+
         // GET api/phieu2?nhaThauId=&bepAnId=&thang=&nam=&trangThai=
         [HttpGet]
         public async Task<IActionResult> DanhSach(
@@ -29,14 +40,14 @@ namespace DanhGiaAPI.Controllers
             [FromQuery] int? nam,
             [FromQuery] string? trangThai)
         {
-            return Ok(await _phieu2Service.DanhSachAsync(nhaThauId, bepAnId, thang, nam, trangThai));
+            return Ok(await _phieu2Service.DanhSachAsync(nhaThauId, bepAnId, thang, nam, trangThai, User.GetNhaThauId()));
         }
 
         // GET api/phieu2/5
         [HttpGet("{id}")]
         public async Task<IActionResult> ChiTiet(int id)
         {
-            return Ok(await _phieu2Service.ChiTietAsync(id));
+            return Ok(await _phieu2Service.ChiTietAsync(id, User.GetNhaThauId()));
         }
 
         // GET api/phieu2/phieu1-kha-dung?nhaThauId=&bepAnId=
@@ -50,7 +61,8 @@ namespace DanhGiaAPI.Controllers
         [HttpPost]
         public async Task<IActionResult> Them([FromBody] Phieu2Request request)
         {
-            return Ok(await _phieu2Service.ThemAsync(request, User.GetNguoiDungId()));
+            ChanTaoPhieuNhaThau();
+            return Ok(await _phieu2Service.ThemAsync(request, User.GetNguoiDungId(), User.GetLaAdmin()));
         }
 
         // PUT api/phieu2/5

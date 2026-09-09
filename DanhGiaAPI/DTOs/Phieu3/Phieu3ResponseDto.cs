@@ -12,7 +12,7 @@ namespace DanhGiaAPI.DTOs.Phieu3
     public class Phieu3ResponseDto
     {
         public Phieu3BaoCao Phieu { get; set; } = null!;
-        public List<Phieu3Bang1Dong> Bang1 { get; set; } = new();
+        public List<Phieu3Bang1DongDto> Bang1 { get; set; } = new();
         public List<Phieu3Bang2DongDto> Bang2 { get; set; } = new();
         public Phieu3YKienNhaThau? YKienNhaThau { get; set; }
     }

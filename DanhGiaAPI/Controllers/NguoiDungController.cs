@@ -7,10 +7,11 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace DanhGiaAPI.Controllers
 {
-    // Toàn bộ endpoint quản lý tài khoản chỉ dành cho người có vai trò
-    // VaiTro.CoQuyenDuyetTk = 1 (claim "co_quyen_duyet_tk" gắn lúc đăng nhập,
-    // xem AuthService) — không hard-code riêng vai trò ADMIN.
-    [Authorize(Policy = "DuyetTaiKhoan")]
+    // Toàn bộ endpoint quản lý tài khoản chỉ dành cho người có quyền
+    // QUAN_LY_TAI_KHOAN (qua VaiTroQuyen) hoặc VaiTro.LaQuanTriVien = 1 (bypass
+    // mọi quyền, xem CoQuyen() trong Program.cs) — không hard-code riêng vai
+    // trò ADMIN. Xem 02. Phantich/modules/VaiTro.md.
+    [Authorize(Policy = "QuanLyTaiKhoan")]
     [Route("api/nguoi-dung")]
     [ApiController]
     public class NguoiDungController : ControllerBase
@@ -102,6 +103,16 @@ namespace DanhGiaAPI.Controllers
             return Ok(new { message = "Đã mở khóa tài khoản." });
         }
 
+        // DELETE api/nguoi-dung/5 — xóa VĨNH VIỄN (khác Khóa). Chặn nếu tự xóa
+        // chính mình, không còn ai quản trị được hệ thống, hoặc tài khoản đã
+        // có dấu vết thật (đã lập/ký phiếu) — xem NguoiDungService.XoaVinhVienAsync.
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> XoaVinhVien(int id)
+        {
+            await _nguoiDungService.XoaVinhVienAsync(id, User.GetNguoiDungId());
+            return Ok(new { message = "Đã xóa vĩnh viễn tài khoản." });
+        }
+
         // PUT api/nguoi-dung/5/vai-tro
         [HttpPut("{id}/vai-tro")]
         public async Task<IActionResult> CapNhatVaiTro(int id, [FromBody] CapNhatVaiTroRequest request)
@@ -117,6 +128,32 @@ namespace DanhGiaAPI.Controllers
         {
             await _nguoiDungService.ResetMatKhauAsync(id);
             return Ok(new { message = "Đã đặt lại mật khẩu về mặc định." });
+        }
+
+        // GET api/nguoi-dung/5/luong-ky-kha-dung — danh sách bước ký user này
+        // có thể được gán (kèm cờ đã gán chưa) — khối "Phân quyền theo Phiếu".
+        [HttpGet("{id}/luong-ky-kha-dung")]
+        public async Task<IActionResult> LuongKyKhaDung(int id)
+        {
+            return Ok(await _nguoiDungService.LuongKyKhaDungAsync(id));
+        }
+
+        // PUT api/nguoi-dung/5/luong-ky — thay thế toàn bộ tập bước ký được
+        // gán trực tiếp cho tài khoản này.
+        [HttpPut("{id}/luong-ky")]
+        public async Task<IActionResult> CapNhatLuongKy(int id, [FromBody] CapNhatLuongKyRequest request)
+        {
+            await _nguoiDungService.CapNhatLuongKyAsync(id, request.MauLuongKyIds);
+            return Ok(new { message = "Cập nhật phân quyền ký thành công." });
+        }
+
+        // PUT api/nguoi-dung/5/phieu-quyen — thay thế toàn bộ quyền thao tác
+        // nội dung phiếu (đánh giá/quản lý tiêu chí) của tài khoản này.
+        [HttpPut("{id}/phieu-quyen")]
+        public async Task<IActionResult> CapNhatPhieuQuyen(int id, [FromBody] CapNhatPhieuQuyenRequest request)
+        {
+            await _nguoiDungService.CapNhatPhieuQuyenAsync(id, request.DanhSach);
+            return Ok(new { message = "Cập nhật phân quyền nội dung phiếu thành công." });
         }
     }
 }

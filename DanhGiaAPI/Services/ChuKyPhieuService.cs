@@ -1,4 +1,5 @@
 using DanhGiaAPI.Common;
+using DanhGiaAPI.DTOs.LuongKy;
 using DanhGiaAPI.Entities;
 using DanhGiaAPI.Repositories.Interfaces;
 using DanhGiaAPI.Services.Interfaces;
@@ -14,7 +15,7 @@ namespace DanhGiaAPI.Services
     {
         private readonly IChuKyPhieuRepository _chuKyPhieuRepository;
         private readonly IMauLuongKyRepository _mauLuongKyRepository;
-        private readonly INguoiDungVaiTroRepository _nguoiDungVaiTroRepository;
+        private readonly INguoiDungMauLuongKyRepository _nguoiDungMauLuongKyRepository;
         private readonly INguoiDungRepository _nguoiDungRepository;
         private readonly IPhieuNhaThauResolver _phieuNhaThauResolver;
         private readonly IUnitOfWork _unitOfWork;
@@ -22,14 +23,14 @@ namespace DanhGiaAPI.Services
         public ChuKyPhieuService(
             IChuKyPhieuRepository chuKyPhieuRepository,
             IMauLuongKyRepository mauLuongKyRepository,
-            INguoiDungVaiTroRepository nguoiDungVaiTroRepository,
+            INguoiDungMauLuongKyRepository nguoiDungMauLuongKyRepository,
             INguoiDungRepository nguoiDungRepository,
             IPhieuNhaThauResolver phieuNhaThauResolver,
             IUnitOfWork unitOfWork)
         {
             _chuKyPhieuRepository = chuKyPhieuRepository;
             _mauLuongKyRepository = mauLuongKyRepository;
-            _nguoiDungVaiTroRepository = nguoiDungVaiTroRepository;
+            _nguoiDungMauLuongKyRepository = nguoiDungMauLuongKyRepository;
             _nguoiDungRepository = nguoiDungRepository;
             _phieuNhaThauResolver = phieuNhaThauResolver;
             _unitOfWork = unitOfWork;
@@ -96,15 +97,24 @@ namespace DanhGiaAPI.Services
             return daHoanTatHetBuocBatBuoc ? "DA_DUYET" : "CHO_KY";
         }
 
-        public async Task<ChuKyPhieu> KyAsync(int id, int nguoiKyId, int? chuKyId, string? ghiChu)
+        public async Task<ChuKyPhieu> KyAsync(int id, int nguoiKyId, int? chuKyId, string? ghiChu, int? nguoiKyThayId)
         {
             var buoc = await LayBuocDangChoKyAsync(id);
 
             await KiemTraTuanTuAsync(buoc);
+            // Người thao tác (đang đăng nhập) LUÔN phải tự đủ điều kiện ký bước
+            // này, kể cả khi đang ký thay cho người khác — tránh người ngoài
+            // nhóm (không cùng nhà thầu/phòng ban/vai trò) tự ý gán chữ ký cho ai đó.
             await KiemTraQuyenKyAsync(buoc, nguoiKyId);
 
+            var nguoiKyThucTe = nguoiKyThayId ?? nguoiKyId;
+            if (nguoiKyThayId.HasValue && nguoiKyThayId != nguoiKyId)
+                await KiemTraQuyenKyAsync(buoc, nguoiKyThayId.Value);
+
+            KiemTraNguoiKyDuKien(buoc, nguoiKyThucTe);
+
             buoc.TrangThai = "DA_DUYET";
-            buoc.NguoiKyId = nguoiKyId;
+            buoc.NguoiKyId = nguoiKyThucTe;
             buoc.ChuKyId = chuKyId;
             buoc.GhiChu = ghiChu;
             buoc.NgayKy = DateTime.Now;
@@ -118,6 +128,7 @@ namespace DanhGiaAPI.Services
             var buoc = await LayBuocDangChoKyAsync(id);
 
             await KiemTraQuyenKyAsync(buoc, nguoiKyId);
+            KiemTraNguoiKyDuKien(buoc, nguoiKyId);
 
             buoc.TrangThai = "TU_CHOI";
             buoc.NguoiKyId = nguoiKyId;
@@ -189,50 +200,160 @@ namespace DanhGiaAPI.Services
                 throw new ApiException("Phải hoàn tất (các) bước ký trước đó trước khi ký bước này");
         }
 
-        // Kiểm tra quyền ký theo đúng LoaiNguoiKy cấu hình ở MauLuongKy — xem
-        // modules/VaiTro.md mục 7 (phân tích + thiết kế trước khi hoàn thiện
-        // 2 nhánh PHONG_BAN/NHA_THAU vốn trước đây bỏ trống).
+        // Kiểm tra quyền ký — xem modules/VaiTro.md mục 9 (mô hình "phân quyền
+        // theo Phiếu", thay hoàn toàn cơ chế LoaiNguoiKy = VAI_TRO cũ).
+        //
+        // Ràng buộc CHUNG cho cả 3 loại: người ký phải được Admin gán TRỰC
+        // TIẾP vào đúng dòng MauLuongKy này (NguoiDungMauLuongKy) — không còn
+        // "cùng phòng ban/nhà thầu/vai trò là tự động ký được" nữa. Với
+        // PHONG_BAN/NHA_THAU, đây là lớp kiểm soát THỨ 2 cộng thêm vào việc
+        // khớp phòng ban/nhà thầu (cả 2 điều kiện đều phải đúng).
+        //
+        // (Sửa 2026-09-02) Có thể có NHIỀU dòng MauLuongKy cùng
+        // (LoaiPhieu, BuocThuTu) khi ký SONG SONG nhiều phòng ban (VD Phiếu 4
+        // bước 1: 1 dòng PHONG_BAN=PDN + 1 dòng PHONG_BAN=PATMT) — 1 dòng
+        // ChuKyPhieu không "thuộc về" cố định 1 dòng MauLuongKy nào (chỉ là 1
+        // trong N chữ ký cần cho bước đó), nên KHÔNG được lấy FirstOrDefault
+        // (luôn trúng đúng 1 dòng cố định, làm người được gán ở dòng còn lại
+        // luôn bị từ chối 403 dù hợp lệ) — phải duyệt qua TẤT CẢ các dòng cùng
+        // bước, người ký hợp lệ nếu thỏa ĐIỀU KIỆN CỦA ÍT NHẤT 1 dòng.
         private async Task KiemTraQuyenKyAsync(ChuKyPhieu buoc, int nguoiKyId)
         {
-            var mauBuoc = _mauLuongKyRepository.Query()
-                .FirstOrDefault(x => x.LoaiPhieu == buoc.LoaiDoiTuong && x.BuocThuTu == buoc.BuocThuTu);
+            var cacMauBuoc = _mauLuongKyRepository.Query()
+                .Where(x => x.LoaiPhieu == buoc.LoaiDoiTuong && x.BuocThuTu == buoc.BuocThuTu)
+                .ToList();
 
-            if (mauBuoc == null)
+            if (cacMauBuoc.Count == 0)
                 return;
+
+            foreach (var mauBuoc in cacMauBuoc)
+            {
+                if (await ThoaMauBuocAsync(buoc, mauBuoc, nguoiKyId))
+                    return;
+            }
+
+            throw new ApiException("Bạn chưa được cấp quyền ký bước này", StatusCodes.Status403Forbidden);
+        }
+
+        // 1 dòng MauLuongKy cụ thể — trả về true nếu nguoiKyId thỏa ĐỦ cả 2 lớp:
+        // (1) được Admin gán trực tiếp vào đúng dòng này, VÀ (2) khớp điều kiện
+        // riêng theo LoaiNguoiKy (PHONG_BAN/NHA_THAU/TRUC_TIEP).
+        private async Task<bool> ThoaMauBuocAsync(ChuKyPhieu buoc, MauLuongKy mauBuoc, int nguoiKyId)
+        {
+            var duocGanTrucTiep = await _nguoiDungMauLuongKyRepository.AnyAsync(
+                x => x.NguoiDungId == nguoiKyId && x.MauLuongKyId == mauBuoc.Id);
+            if (!duocGanTrucTiep)
+                return false;
 
             switch (mauBuoc.LoaiNguoiKy)
             {
-                case "VAI_TRO":
-                    if (!mauBuoc.VaiTroId.HasValue)
-                        return;
-
-                    var vaiTroCuaNguoiDung = await _nguoiDungVaiTroRepository.GetVaiTroCuaNguoiDungAsync(nguoiKyId);
-                    if (!vaiTroCuaNguoiDung.Any(vt => vt.Id == mauBuoc.VaiTroId))
-                        throw new ApiException("Bạn không có vai trò được cấu hình để ký bước này", StatusCodes.Status403Forbidden);
-                    return;
-
                 case "PHONG_BAN":
                     if (!mauBuoc.PhongBanId.HasValue)
-                        return;
+                        return false;
 
                     var nguoiDungPhongBan = await _nguoiDungRepository.GetByIdAsync(nguoiKyId);
-                    if (nguoiDungPhongBan?.PhongBanId != mauBuoc.PhongBanId)
-                        throw new ApiException("Bạn không thuộc phòng ban được cấu hình để ký bước này", StatusCodes.Status403Forbidden);
-                    return;
+                    return nguoiDungPhongBan?.PhongBanId == mauBuoc.PhongBanId;
 
                 case "NHA_THAU":
                     var nhaThauIdCuaPhieu = await _phieuNhaThauResolver.LayNhaThauIdAsync(buoc.LoaiDoiTuong, buoc.DoiTuongId);
                     if (!nhaThauIdCuaPhieu.HasValue)
-                        throw new ApiException("Không xác định được nhà thầu của phiếu này để kiểm tra quyền ký", StatusCodes.Status403Forbidden);
+                        return false;
 
                     var nguoiDungNhaThau = await _nguoiDungRepository.GetByIdAsync(nguoiKyId);
-                    if (nguoiDungNhaThau?.NhaThauId != nhaThauIdCuaPhieu)
-                        throw new ApiException("Bạn không thuộc nhà thầu của phiếu này nên không thể ký bước này", StatusCodes.Status403Forbidden);
-                    return;
+                    return nguoiDungNhaThau?.NhaThauId == nhaThauIdCuaPhieu;
 
-                default:
-                    return;
+                default: // TRUC_TIEP — đã đủ điều kiện qua "duocGanTrucTiep" ở trên
+                    return true;
             }
+        }
+
+        // Ràng buộc cứng khi bước đã có NguoiKyDuKienId: chữ ký cuối cùng BẮT
+        // BUỘC phải đứng tên đúng người được chỉ định — chặn cả "tự ký" (người
+        // khác tự đăng nhập ký) lẫn "ký thay ai đó khác người đã chỉ định".
+        private static void KiemTraNguoiKyDuKien(ChuKyPhieu buoc, int nguoiKyThucTe)
+        {
+            if (buoc.NguoiKyDuKienId.HasValue && buoc.NguoiKyDuKienId != nguoiKyThucTe)
+                throw new ApiException("Bước này đã chỉ định người ký khác, bạn không thể ký/từ chối thay", StatusCodes.Status403Forbidden);
+        }
+
+        public async Task<ChuKyPhieu> DatNguoiKyDuKienAsync(int id, int nguoiThucHienId, int nguoiKyDuKienId)
+        {
+            var buoc = await LayBuocDangChoKyAsync(id);
+
+            // Cả người đặt lẫn người được chỉ định đều phải tự đủ điều kiện ký
+            // đúng bước này (xem VaiTro.md/LuongTrinhKy.md) — tránh người ngoài
+            // nhóm tự ý áp đặt ai sẽ là người ký của nhóm khác.
+            await KiemTraQuyenKyAsync(buoc, nguoiThucHienId);
+            await KiemTraQuyenKyAsync(buoc, nguoiKyDuKienId);
+
+            buoc.NguoiKyDuKienId = nguoiKyDuKienId;
+            _chuKyPhieuRepository.Update(buoc);
+            await _unitOfWork.SaveChangesAsync();
+            return buoc;
+        }
+
+        // Danh sách người đủ điều kiện ký 1 bước — dùng cho dropdown FE "chỉ
+        // định người ký" / "ký thay". Cùng logic điều kiện với KiemTraQuyenKyAsync,
+        // chỉ khác là liệt kê thay vì kiểm tra 1 người.
+        //
+        // (Sửa 2026-09-02) Gộp (union) danh sách hợp lệ từ TẤT CẢ các dòng
+        // MauLuongKy cùng (LoaiPhieu, BuocThuTu) — cùng lý do với
+        // KiemTraQuyenKyAsync: bước ký song song nhiều phòng ban có nhiều dòng
+        // cùng BuocThuTu, FirstOrDefault trước đây chỉ liệt kê được người của
+        // 1 trong các dòng đó.
+        public async Task<List<NguoiKyKhaDungDto>> DanhSachNguoiKyKhaDungAsync(int id)
+        {
+            var buoc = await _chuKyPhieuRepository.GetByIdAsync(id)
+                ?? throw new ApiException("Không tìm thấy bước ký", StatusCodes.Status404NotFound);
+
+            var cacMauBuoc = _mauLuongKyRepository.Query()
+                .Where(x => x.LoaiPhieu == buoc.LoaiDoiTuong && x.BuocThuTu == buoc.BuocThuTu)
+                .ToList();
+            if (cacMauBuoc.Count == 0)
+                return new List<NguoiKyKhaDungDto>();
+
+            var ketQua = new List<NguoiDung>();
+            foreach (var mauBuoc in cacMauBuoc)
+            {
+                IQueryable<NguoiDung> query = _nguoiDungRepository.Query();
+                switch (mauBuoc.LoaiNguoiKy)
+                {
+                    case "PHONG_BAN":
+                        if (!mauBuoc.PhongBanId.HasValue)
+                            continue;
+
+                        query = query.Where(x => x.PhongBanId == mauBuoc.PhongBanId);
+                        break;
+
+                    case "NHA_THAU":
+                        var nhaThauId = await _phieuNhaThauResolver.LayNhaThauIdAsync(buoc.LoaiDoiTuong, buoc.DoiTuongId);
+                        if (!nhaThauId.HasValue)
+                            continue;
+
+                        query = query.Where(x => x.NhaThauId == nhaThauId);
+                        break;
+
+                    case "TRUC_TIEP":
+                        break; // không lọc cấu trúc gì thêm — chỉ dựa vào gán trực tiếp bên dưới
+
+                    default:
+                        continue;
+                }
+
+                // Giao với danh sách được Admin gán trực tiếp vào đúng dòng này
+                // (thay cho lọc theo VaiTro cũ) — xem KiemTraQuyenKyAsync.
+                var idDuocGan = (await _nguoiDungMauLuongKyRepository.GetByMauLuongKyIdAsync(mauBuoc.Id))
+                    .Select(x => x.NguoiDungId)
+                    .ToList();
+
+                ketQua.AddRange(query.Where(x => idDuocGan.Contains(x.Id) && x.TrangThai == "HOAT_DONG"));
+            }
+
+            return ketQua
+                .DistinctBy(x => x.Id)
+                .OrderBy(x => x.HoTen)
+                .Select(x => new NguoiKyKhaDungDto { Id = x.Id, HoTen = x.HoTen, TenDangNhap = x.TenDangNhap })
+                .ToList();
         }
     }
 }

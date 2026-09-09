@@ -45,7 +45,6 @@ namespace DanhGiaAPI.Services
                 TenBuoc = request.TenBuoc.Trim(),
                 LoaiNguoiKy = request.LoaiNguoiKy.Trim(),
                 PhongBanId = request.PhongBanId,
-                VaiTroId = request.VaiTroId,
                 BatBuoc = request.BatBuoc
             };
             await _mauLuongKyRepository.AddAsync(mau);
@@ -65,7 +64,6 @@ namespace DanhGiaAPI.Services
             mau.TenBuoc = request.TenBuoc.Trim();
             mau.LoaiNguoiKy = request.LoaiNguoiKy.Trim();
             mau.PhongBanId = request.PhongBanId;
-            mau.VaiTroId = request.VaiTroId;
             mau.BatBuoc = request.BatBuoc;
             await _unitOfWork.SaveChangesAsync();
             return mau;
@@ -80,12 +78,12 @@ namespace DanhGiaAPI.Services
             await _unitOfWork.SaveChangesAsync();
         }
 
-        private static readonly string[] LoaiNguoiKyHopLe = { "PHONG_BAN", "NHA_THAU", "VAI_TRO" };
+        private static readonly string[] LoaiNguoiKyHopLe = { "PHONG_BAN", "NHA_THAU", "TRUC_TIEP" };
 
         private static void KiemTraLoaiNguoiKy(MauLuongKyRequest request)
         {
             if (!LoaiNguoiKyHopLe.Contains(request.LoaiNguoiKy.Trim()))
-                throw new ApiException("LoaiNguoiKy phải là PHONG_BAN, NHA_THAU hoặc VAI_TRO");
+                throw new ApiException("LoaiNguoiKy phải là PHONG_BAN, NHA_THAU hoặc TRUC_TIEP");
         }
     }
 }

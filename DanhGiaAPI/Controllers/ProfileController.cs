@@ -8,7 +8,7 @@ namespace DanhGiaAPI.Controllers
 {
     // Mỗi người dùng tự quản lý thông tin/mật khẩu của chính mình —
     // NguoiDungId luôn lấy từ claim JWT, không nhận từ client. Khác
-    // NguoiDungController (yêu cầu policy "DuyetTaiKhoan"): endpoint ở đây
+    // NguoiDungController (yêu cầu policy "QuanLyTaiKhoan"): endpoint ở đây
     // chỉ cần đã đăng nhập, không phân biệt vai trò.
     [Authorize]
     [Route("api/profile")]

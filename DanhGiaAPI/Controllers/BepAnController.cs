@@ -31,7 +31,7 @@ namespace DanhGiaAPI.Controllers
         }
 
         // POST api/bep-an
-        [Authorize(Policy = "DuyetTaiKhoan")]
+        [Authorize(Policy = "QuanLyDanhMuc")]
         [HttpPost]
         public async Task<IActionResult> Them([FromBody] BepAnRequest request)
         {
@@ -39,7 +39,7 @@ namespace DanhGiaAPI.Controllers
         }
 
         // PUT api/bep-an/5
-        [Authorize(Policy = "DuyetTaiKhoan")]
+        [Authorize(Policy = "QuanLyDanhMuc")]
         [HttpPut("{id}")]
         public async Task<IActionResult> Sua(int id, [FromBody] BepAnRequest request)
         {
@@ -47,7 +47,7 @@ namespace DanhGiaAPI.Controllers
         }
 
         // DELETE api/bep-an/5
-        [Authorize(Policy = "DuyetTaiKhoan")]
+        [Authorize(Policy = "QuanLyDanhMuc")]
         [HttpDelete("{id}")]
         public async Task<IActionResult> Xoa(int id)
         {

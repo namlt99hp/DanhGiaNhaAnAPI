@@ -17,10 +17,9 @@ namespace DanhGiaAPI.DTOs.LuongKy
 
         [Required(ErrorMessage = "Loại người ký không được để trống")]
         [MaxLength(20)]
-        public string LoaiNguoiKy { get; set; } = null!; // PHONG_BAN / NHA_THAU / VAI_TRO
+        public string LoaiNguoiKy { get; set; } = null!; // PHONG_BAN / NHA_THAU / TRUC_TIEP
 
         public int? PhongBanId { get; set; }
-        public int? VaiTroId { get; set; }
         public bool BatBuoc { get; set; } = true;
     }
 }

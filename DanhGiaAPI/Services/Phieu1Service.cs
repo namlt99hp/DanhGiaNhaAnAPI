@@ -16,6 +16,9 @@ namespace DanhGiaAPI.Services
         private readonly IPhieu1KetLuanRepository _phieu1KetLuanRepository;
         private readonly IBepAnRepository _bepAnRepository;
         private readonly IPhongBanRepository _phongBanRepository;
+        private readonly INhaThauRepository _nhaThauRepository;
+        private readonly INguoiDungPhieuQuyenRepository _nguoiDungPhieuQuyenRepository;
+        private readonly ITieuChiRepository _tieuChiRepository;
         private readonly ISoHieuService _soHieuService;
         private readonly ITepDinhKemService _tepDinhKemService;
         private readonly IChuKyPhieuService _chuKyPhieuService;
@@ -27,6 +30,9 @@ namespace DanhGiaAPI.Services
             IPhieu1KetLuanRepository phieu1KetLuanRepository,
             IBepAnRepository bepAnRepository,
             IPhongBanRepository phongBanRepository,
+            INhaThauRepository nhaThauRepository,
+            INguoiDungPhieuQuyenRepository nguoiDungPhieuQuyenRepository,
+            ITieuChiRepository tieuChiRepository,
             ISoHieuService soHieuService,
             ITepDinhKemService tepDinhKemService,
             IChuKyPhieuService chuKyPhieuService,
@@ -37,19 +43,57 @@ namespace DanhGiaAPI.Services
             _phieu1KetLuanRepository = phieu1KetLuanRepository;
             _bepAnRepository = bepAnRepository;
             _phongBanRepository = phongBanRepository;
+            _nhaThauRepository = nhaThauRepository;
+            _nguoiDungPhieuQuyenRepository = nguoiDungPhieuQuyenRepository;
+            _tieuChiRepository = tieuChiRepository;
             _soHieuService = soHieuService;
             _tepDinhKemService = tepDinhKemService;
             _chuKyPhieuService = chuKyPhieuService;
             _unitOfWork = unitOfWork;
         }
 
-        public async Task<List<Phieu1KiemTra>> DanhSachAsync(int? bepAnId, int? phongBanId, int? nhaThauId, string? trangThai, DateTime? tuNgay, DateTime? denNgay)
+        // Snapshot tên tiêu chí tại thời điểm lưu — tra 1 lần theo batch, tránh
+        // N+1. Dòng tự thêm (TieuChiId = NULL) không cần snapshot (đã có sẵn
+        // NoiDungTuThem do người dùng gõ tay).
+        private async Task<Dictionary<int, string>> LayTenTieuChiTheoBatchAsync(IEnumerable<Phieu1ChiTietRequest> chiTiet)
+        {
+            var tieuChiIds = chiTiet.Where(d => d.TieuChiId.HasValue).Select(d => d.TieuChiId!.Value).Distinct().ToList();
+            if (tieuChiIds.Count == 0) return new Dictionary<int, string>();
+
+            var tieuChi = await _tieuChiRepository.FindAsync(x => tieuChiIds.Contains(x.Id));
+            return tieuChi.ToDictionary(x => x.Id, x => x.NoiDung);
+        }
+
+        // Quyền "Đánh giá / nhập liệu" theo NguoiDungPhieuQuyen (xem
+        // 02. Phantich/modules/VaiTro.md mục 9) — KHÔNG hard-code theo phòng
+        // ban: cả P.ĐN và P.ATMT đều có thể được cấp (giữ đúng thiết kế gốc
+        // "2 phòng ban lập Phiếu 1 độc lập để đối chiếu chéo", xem
+        // Phieu1_KiemTraVSATTP.md).
+        // laAdmin bypass, giống hệt CoQuyen() ở Program.cs / coQuyen() ở FE
+        // (quyenV2.ts) — admin (VaiTro.LaQuanTriVien) luôn được phép mọi thao
+        // tác, không bị chặn bởi NguoiDungPhieuQuyen.
+        private async Task KiemTraQuyenDanhGiaAsync(int? nguoiDungId, bool laAdmin)
+        {
+            if (laAdmin) return;
+
+            if (!nguoiDungId.HasValue || !await _nguoiDungPhieuQuyenRepository.AnyAsync(
+                    x => x.NguoiDungId == nguoiDungId.Value && x.LoaiPhieu == "PHIEU1" && x.DuocDanhGia))
+                throw new ApiException(
+                    "Bạn không có quyền tạo Phiếu 1 — liên hệ Admin để được phân quyền \"Đánh giá / nhập liệu\" ở mục Phân quyền theo Phiếu",
+                    StatusCodes.Status403Forbidden);
+        }
+
+        public async Task<List<Phieu1KiemTra>> DanhSachAsync(int? bepAnId, int? phongBanId, int? nhaThauId, string? trangThai, DateTime? tuNgay, DateTime? denNgay, int? nhaThauCuaNguoiGoi)
         {
             var query = _phieu1Repository.Query();
 
+            // Tài khoản nhà thầu chỉ xem được phiếu của chính mình — ép lọc,
+            // bỏ qua nhaThauId truyền vào nếu khác (xem DangNhap.md).
+            if (nhaThauCuaNguoiGoi.HasValue) query = query.Where(x => x.NhaThauId == nhaThauCuaNguoiGoi);
+            else if (nhaThauId.HasValue) query = query.Where(x => x.NhaThauId == nhaThauId);
+
             if (bepAnId.HasValue) query = query.Where(x => x.BepAnId == bepAnId);
             if (phongBanId.HasValue) query = query.Where(x => x.PhongBanId == phongBanId);
-            if (nhaThauId.HasValue) query = query.Where(x => x.NhaThauId == nhaThauId);
             if (!string.IsNullOrWhiteSpace(trangThai)) query = query.Where(x => x.TrangThai == trangThai);
             if (tuNgay.HasValue) query = query.Where(x => x.NgayKiemTra >= tuNgay.Value.Date);
             if (denNgay.HasValue) query = query.Where(x => x.NgayKiemTra <= denNgay.Value.Date);
@@ -57,10 +101,13 @@ namespace DanhGiaAPI.Services
             return query.OrderByDescending(x => x.NgayKiemTra).ThenByDescending(x => x.Id).ToList();
         }
 
-        public async Task<Phieu1ResponseDto> ChiTietAsync(int id)
+        public async Task<Phieu1ResponseDto> ChiTietAsync(int id, int? nhaThauCuaNguoiGoi)
         {
             var phieu = await _phieu1Repository.GetByIdAsync(id)
                 ?? throw new ApiException("Không tìm thấy phiếu kiểm tra", StatusCodes.Status404NotFound);
+
+            if (nhaThauCuaNguoiGoi.HasValue && phieu.NhaThauId != nhaThauCuaNguoiGoi)
+                throw new ApiException("Bạn không có quyền xem phiếu của nhà thầu khác", StatusCodes.Status403Forbidden);
 
             var chiTiet = await _phieu1ChiTietRepository.FindAsync(x => x.PhieuId == id);
             var ketLuan = await _phieu1KetLuanRepository.FirstOrDefaultAsync(x => x.PhieuId == id);
@@ -73,22 +120,24 @@ namespace DanhGiaAPI.Services
             };
         }
 
-        public async Task<Phieu1ResponseDto> ThemAsync(Phieu1Request request, int? nguoiTaoId)
+        public async Task<Phieu1ResponseDto> ThemAsync(Phieu1Request request, int? nguoiTaoId, bool laAdmin)
         {
+            await KiemTraQuyenDanhGiaAsync(nguoiTaoId, laAdmin);
+
             var bepAn = await _bepAnRepository.GetByIdAsync(request.BepAnId)
                 ?? throw new ApiException("Không tìm thấy bếp ăn", StatusCodes.Status404NotFound);
-            if (!bepAn.NhaThauId.HasValue)
-                throw new ApiException("Bếp ăn chưa gán nhà thầu vận hành, không thể lập phiếu");
+
+            // Nhà thầu do người lập phiếu tự chọn (KHÔNG suy ra từ BepAn.NhaThauId)
+            // — hiện chưa có bảng liên kết đáng tin cậy giữa nhà thầu và
+            // bếp ăn/nhà ăn theo thời gian (1 bếp ăn có thể đổi nhà thầu vận
+            // hành qua các đợt hợp đồng khác nhau).
+            _ = await _nhaThauRepository.GetByIdAsync(request.NhaThauId)
+                ?? throw new ApiException("Không tìm thấy nhà thầu", StatusCodes.Status404NotFound);
 
             var phongBan = await _phongBanRepository.GetByIdAsync(request.PhongBanId)
                 ?? throw new ApiException("Không tìm thấy phòng ban", StatusCodes.Status404NotFound);
 
             var ngay = request.NgayKiemTra.Date;
-            var trung = await _phieu1Repository.FirstOrDefaultAsync(x =>
-                x.NgayKiemTra == ngay && x.BepAnId == request.BepAnId && x.PhongBanId == request.PhongBanId);
-            if (trung != null)
-                throw new ApiException("Đã tồn tại phiếu kiểm tra cho bếp ăn, ngày và phòng ban này");
-
             var soHieu = await SinhSoHieuAsync(bepAn.Ma, phongBan.Ma, ngay);
 
             var phieu = new Phieu1KiemTra
@@ -96,7 +145,7 @@ namespace DanhGiaAPI.Services
                 SoHieu = soHieu,
                 NgayKiemTra = ngay,
                 BepAnId = request.BepAnId,
-                NhaThauId = bepAn.NhaThauId.Value,
+                NhaThauId = request.NhaThauId,
                 PhongBanId = request.PhongBanId,
                 NguoiTao = nguoiTaoId,
                 TrangThai = "NHAP",
@@ -109,6 +158,7 @@ namespace DanhGiaAPI.Services
                 await _phieu1Repository.AddAsync(phieu);
                 await _unitOfWork.SaveChangesAsync(); // cần Id thật của phieu trước khi ghi chi tiết/kết luận
 
+                var tenTieuChiTheoId = await LayTenTieuChiTheoBatchAsync(request.ChiTiet);
                 foreach (var dong in request.ChiTiet)
                 {
                     await _phieu1ChiTietRepository.AddAsync(new Phieu1ChiTiet
@@ -116,6 +166,7 @@ namespace DanhGiaAPI.Services
                         PhieuId = phieu.Id,
                         NhomId = dong.NhomId,
                         TieuChiId = dong.TieuChiId,
+                        TenTieuChi = dong.TieuChiId.HasValue && tenTieuChiTheoId.TryGetValue(dong.TieuChiId.Value, out var ten) ? ten : null,
                         NoiDungTuThem = dong.NoiDungTuThem,
                         KetQua = dong.KetQua,
                         GhiChu = dong.GhiChu,
@@ -141,7 +192,7 @@ namespace DanhGiaAPI.Services
                 throw;
             }
 
-            return await ChiTietAsync(phieu.Id);
+            return await ChiTietAsync(phieu.Id, null);
         }
 
         public async Task<Phieu1ResponseDto> SuaAsync(int id, Phieu1Request request)
@@ -152,14 +203,14 @@ namespace DanhGiaAPI.Services
             if (phieu.TrangThai != "NHAP" && phieu.TrangThai != "TU_CHOI")
                 throw new ApiException("Chỉ có thể sửa phiếu đang ở trạng thái Nháp hoặc bị Từ chối");
 
+            _ = await _nhaThauRepository.GetByIdAsync(request.NhaThauId)
+                ?? throw new ApiException("Không tìm thấy nhà thầu", StatusCodes.Status404NotFound);
+
             var ngay = request.NgayKiemTra.Date;
-            var trung = await _phieu1Repository.FirstOrDefaultAsync(x =>
-                x.NgayKiemTra == ngay && x.BepAnId == request.BepAnId && x.PhongBanId == request.PhongBanId && x.Id != id);
-            if (trung != null)
-                throw new ApiException("Đã tồn tại phiếu kiểm tra cho bếp ăn, ngày và phòng ban này");
 
             phieu.NgayKiemTra = ngay;
             phieu.BepAnId = request.BepAnId;
+            phieu.NhaThauId = request.NhaThauId;
             phieu.PhongBanId = request.PhongBanId;
             phieu.TrangThai = "NHAP"; // sửa phiếu bị từ chối -> quay lại Nháp, cần gửi ký lại từ đầu
             _phieu1Repository.Update(phieu);
@@ -173,8 +224,17 @@ namespace DanhGiaAPI.Services
                 var canXoa = hienTai.Where(x => !idGiuLai.Contains(x.Id)).ToList();
                 _phieu1ChiTietRepository.RemoveRange(canXoa);
 
+                // Snapshot lại tên tiêu chí mỗi lần lưu — phiếu chỉ sửa được khi
+                // còn NHAP/TU_CHOI (chặn ở đầu hàm), nên snapshot chỉ "chốt cứng"
+                // đúng lúc phiếu chuyển CHO_KY (gửi ký), không còn SuaAsync nào
+                // gọi được nữa sau đó — xem Phieu1ChiTiet.TenTieuChi.
+                var tenTieuChiTheoId = await LayTenTieuChiTheoBatchAsync(request.ChiTiet);
                 foreach (var dong in request.ChiTiet)
                 {
+                    var tenTieuChiMoi = dong.TieuChiId.HasValue && tenTieuChiTheoId.TryGetValue(dong.TieuChiId.Value, out var ten)
+                        ? ten
+                        : null;
+
                     if (dong.Id.HasValue && dong.Id > 0)
                     {
                         var dongHienTai = hienTai.FirstOrDefault(x => x.Id == dong.Id);
@@ -182,6 +242,7 @@ namespace DanhGiaAPI.Services
 
                         dongHienTai.NhomId = dong.NhomId;
                         dongHienTai.TieuChiId = dong.TieuChiId;
+                        dongHienTai.TenTieuChi = tenTieuChiMoi;
                         dongHienTai.NoiDungTuThem = dong.NoiDungTuThem;
                         dongHienTai.KetQua = dong.KetQua;
                         dongHienTai.GhiChu = dong.GhiChu;
@@ -195,6 +256,7 @@ namespace DanhGiaAPI.Services
                             PhieuId = id,
                             NhomId = dong.NhomId,
                             TieuChiId = dong.TieuChiId,
+                            TenTieuChi = tenTieuChiMoi,
                             NoiDungTuThem = dong.NoiDungTuThem,
                             KetQua = dong.KetQua,
                             GhiChu = dong.GhiChu,
@@ -238,7 +300,7 @@ namespace DanhGiaAPI.Services
                 throw;
             }
 
-            return await ChiTietAsync(id);
+            return await ChiTietAsync(id, null);
         }
 
         public async Task XoaAsync(int id)

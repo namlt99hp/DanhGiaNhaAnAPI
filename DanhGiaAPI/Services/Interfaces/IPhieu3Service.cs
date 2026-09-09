@@ -5,9 +5,11 @@ namespace DanhGiaAPI.Services.Interfaces
 {
     public interface IPhieu3Service
     {
-        Task<List<Phieu3BaoCao>> DanhSachAsync(int? nhaThauId, int? thang, int? nam, string? trangThai);
+        // nhaThauCuaNguoiGoi: NULL với tài khoản nội bộ; có giá trị với tài
+        // khoản nhà thầu -> ép lọc/kiểm tra về đúng nhà thầu đó (xem DangNhap.md).
+        Task<List<Phieu3BaoCao>> DanhSachAsync(int? nhaThauId, int? thang, int? nam, string? trangThai, int? nhaThauCuaNguoiGoi);
 
-        Task<Phieu3ResponseDto> ChiTietAsync(int id);
+        Task<Phieu3ResponseDto> ChiTietAsync(int id, int? nhaThauCuaNguoiGoi);
 
         // Tạo phiếu + tính tự động Bảng 1 (trừ dòng TONG_SUAT_AN — nhập tay) +
         // khởi tạo khung Bảng 2 (2 dòng PDN/ATMT x 6 tiêu chí, nhập tay hoàn toàn).

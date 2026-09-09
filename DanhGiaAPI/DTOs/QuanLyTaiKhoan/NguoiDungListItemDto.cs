@@ -14,5 +14,10 @@ namespace DanhGiaAPI.DTOs.QuanLyTaiKhoan
         public DateTime? NgayDuyet { get; set; }
         public DateTime NgayTao { get; set; }
         public List<string> DanhSachVaiTro { get; set; } = new();
+
+        // Chỉ populate đầy đủ ở ChiTietAsync (dùng cho form sửa) — DanhSachAsync
+        // (màn danh sách) để rỗng, tránh N+1 không cần thiết.
+        public List<int> DanhSachMauLuongKyId { get; set; } = new();
+        public List<NguoiDungPhieuQuyenItemDto> PhieuQuyen { get; set; } = new();
     }
 }

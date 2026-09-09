@@ -26,5 +26,10 @@ namespace DanhGiaAPI.DTOs.QuanLyTaiKhoan
         public int? PhongBanId { get; set; }
         public int? NhaThauId { get; set; }
         public List<int> VaiTroIds { get; set; } = new();
+
+        // Phân quyền theo Phiếu — gán luôn lúc tạo tài khoản (tùy chọn), xem
+        // 02. Phantich/modules/VaiTro.md mục 9.
+        public List<int> MauLuongKyIds { get; set; } = new();
+        public List<NguoiDungPhieuQuyenItemDto> PhieuQuyen { get; set; } = new();
     }
 }

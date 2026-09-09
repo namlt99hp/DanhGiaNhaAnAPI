@@ -1,13 +1,12 @@
 using DanhGiaAPI.DTOs.QuanLyTaiKhoan;
-using DanhGiaAPI.Entities;
 
 namespace DanhGiaAPI.Services.Interfaces
 {
     public interface IVaiTroService
     {
-        Task<List<VaiTro>> DanhSachAsync();
-        Task<VaiTro> ThemAsync(VaiTroRequest request);
-        Task<VaiTro> SuaAsync(int id, VaiTroRequest request);
+        Task<List<VaiTroResponseDto>> DanhSachAsync();
+        Task<VaiTroResponseDto> ThemAsync(VaiTroRequest request);
+        Task<VaiTroResponseDto> SuaAsync(int id, VaiTroRequest request);
         Task XoaAsync(int id);
     }
 }

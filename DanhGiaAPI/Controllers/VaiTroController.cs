@@ -24,7 +24,7 @@ namespace DanhGiaAPI.Controllers
         }
 
         // POST api/vai-tro
-        [Authorize(Policy = "DuyetTaiKhoan")]
+        [Authorize(Policy = "QuanLyVaiTro")]
         [HttpPost]
         public async Task<IActionResult> Them([FromBody] VaiTroRequest request)
         {
@@ -32,7 +32,7 @@ namespace DanhGiaAPI.Controllers
         }
 
         // PUT api/vai-tro/5
-        [Authorize(Policy = "DuyetTaiKhoan")]
+        [Authorize(Policy = "QuanLyVaiTro")]
         [HttpPut("{id}")]
         public async Task<IActionResult> Sua(int id, [FromBody] VaiTroRequest request)
         {
@@ -40,7 +40,7 @@ namespace DanhGiaAPI.Controllers
         }
 
         // DELETE api/vai-tro/5
-        [Authorize(Policy = "DuyetTaiKhoan")]
+        [Authorize(Policy = "QuanLyVaiTro")]
         [HttpDelete("{id}")]
         public async Task<IActionResult> Xoa(int id)
         {

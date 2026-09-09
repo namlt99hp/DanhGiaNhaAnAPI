@@ -10,6 +10,9 @@ namespace DanhGiaAPI.DTOs.Phieu1
         [Required(ErrorMessage = "Vui lòng chọn bếp ăn")]
         public int BepAnId { get; set; }
 
+        [Required(ErrorMessage = "Vui lòng chọn nhà thầu")]
+        public int NhaThauId { get; set; }
+
         [Required(ErrorMessage = "Vui lòng chọn phòng ban lập phiếu")]
         public int PhongBanId { get; set; }
 

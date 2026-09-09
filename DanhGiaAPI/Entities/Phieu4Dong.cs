@@ -24,5 +24,27 @@ namespace DanhGiaAPI.Entities
         // Phiếu 1. NULL = dòng không thuộc nhóm nào (bảng chưa có master, hoặc
         // người dùng thêm dòng ngoài mọi nhóm).
         public int? NhomTieuChiId { get; set; }
+
+        // Bảng 4/5: dòng này ứng với địa điểm ăn nào — liên kết LOGIC tới
+        // dbo.DiaDiemNhaAn.ID (bảng legacy nằm ngoài schema module này, không
+        // có FK constraint thật, giống Phieu2DanhGia.NhaAnId).
+        public int? DiaDiemNhaAnId { get; set; }
+
+        // CHỈ dùng cho Bảng 5: dòng này thuộc nhà thầu nào (nhóm theo nhà
+        // thầu). KHÁC NGHĨA với Phieu4GiaTri.NhaThauId (cột nhà thầu của
+        // Bảng 1-3) — đừng nhầm lẫn 2 field cùng tên khác ý nghĩa này.
+        public int? NhaThauId { get; set; }
+
+        // Bảng 4/5: giá trị KHÔNG chia theo cột nhà thầu — thay cho cơ chế
+        // Phieu4GiaTri (dòng × nhà thầu) dùng ở Bảng 1-3. Từ chỗ nhập tay
+        // hoàn toàn, nay TỰ ĐỘNG = tổng DuLieuCom.Com_ThucTe_ALL tại đúng
+        // DiaDiemNhaAnId trong [TuNgay, DenNgay] của phiếu (xem
+        // TinhLaiGiaTriChungTheoDiaDiemAsync ở Phieu4Service).
+        public decimal? GiaTriChung { get; set; }
+
+        // Bảng 4/5: true nếu người dùng đã tự sửa GiaTriChung — chặn không
+        // cho lần "tính lại" sau ghi đè (giống Phieu4GiaTri.ChinhSuaThuCong ở
+        // Bảng 1-3, ALTER thêm cột khi chuyển GiaTriChung sang tự động).
+        public bool ChinhSuaThuCong { get; set; }
     }
 }

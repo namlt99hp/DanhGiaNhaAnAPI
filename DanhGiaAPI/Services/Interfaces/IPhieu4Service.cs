@@ -1,3 +1,4 @@
+using DanhGiaAPI.DTOs.Common;
 using DanhGiaAPI.DTOs.Phieu4;
 using DanhGiaAPI.Entities;
 
@@ -5,15 +6,22 @@ namespace DanhGiaAPI.Services.Interfaces
 {
     public interface IPhieu4Service
     {
-        Task<List<Phieu4TongHop>> DanhSachAsync(string? trangThai);
+        // tuNgay/denNgay lọc theo TuNgay (đầu kỳ). tuKhoa: lọc SoHieu.
+        // chiCuaToi: chỉ phiếu do nguoiDungId tạo.
+        Task<PagedResultDto<Phieu4TongHop>> DanhSachAsync(
+            string? trangThai, DateTime? tuNgay, DateTime? denNgay, string? tuKhoa, bool chiCuaToi, int page, int pageSize,
+            int nguoiDungId, bool laAdmin);
 
-        Task<Phieu4ResponseDto> ChiTietAsync(int id);
+        Task<Phieu4ResponseDto> ChiTietAsync(int id, int nguoiDungId, bool laAdmin);
 
         // Tạo phiếu + chọn cột nhà thầu + khởi tạo Bảng 1 (cấu trúc cố định,
         // tự tính ngay) + khởi tạo khung Bảng 2-5 (rỗng, nội dung tự do).
-        Task<Phieu4ResponseDto> ThemAsync(Phieu4Request request, int? nguoiTaoId);
+        Task<Phieu4ResponseDto> ThemAsync(Phieu4Request request, int? nguoiTaoId, bool laAdmin);
 
-        Task XoaAsync(int id);
+        // laAdmin bypass hoàn toàn ràng buộc "chỉ xóa được khi NHAP" — Admin có
+        // thể xóa phiếu ở BẤT KỲ trạng thái nào từ trang danh sách, kèm dọn dẹp
+        // dữ liệu luồng ký (ChuKyPhieu) liên quan — xem Phieu4Service.XoaAsync.
+        Task XoaAsync(int id, bool laAdmin);
 
         // Thêm 1 cột nhà thầu vào phiếu đã lập (chỉ khi NHAP/TU_CHOI) — tạo ô
         // giá trị rỗng cho nhà thầu mới ở mọi dòng của mọi bảng (1-5), rồi tính
@@ -43,5 +51,11 @@ namespace DanhGiaAPI.Services.Interfaces
         Task<Phieu4TongHop> GuiKyAsync(int id);
 
         Task<Phieu4TongHop> DongBoTrangThaiAsync(int id);
+
+        // Thêm/xóa 1 "đoạn" thời gian + địa điểm CỦA RIÊNG 1 cột nhà thầu
+        // (chỉ khi NHAP/TU_CHOI) — tính lại Bảng 1 ngay sau khi thao tác.
+        Task<Phieu4ResponseDto> ThemDoanAsync(int id, int nhaThauId, DoanRequest request);
+
+        Task<Phieu4ResponseDto> XoaDoanAsync(int id, int nhaThauId, int doanId);
     }
 }

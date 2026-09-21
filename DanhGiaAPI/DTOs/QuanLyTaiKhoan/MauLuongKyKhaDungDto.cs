@@ -16,6 +16,12 @@ namespace DanhGiaAPI.DTOs.QuanLyTaiKhoan
         // không khớp thay vì để Admin gán nhầm.
         public bool DuDieuKienCauTruc { get; set; }
 
+        // true nếu loại phiếu của bước này nằm trong "trần" phòng ban/nhà
+        // thầu của user (xem NguoiDungService.TinhLoaiPhieuApDung) — khác lý
+        // do của DuDieuKienCauTruc (đó là khớp CẤU TRÚC PHONG_BAN/NHA_THAU
+        // của riêng dòng MauLuongKy này).
+        public bool DuDieuKienPhongBan { get; set; }
+
         public bool DaDuocGan { get; set; }
     }
 }

@@ -1,7 +1,18 @@
+using DanhGiaAPI.DTOs.Common;
 using DanhGiaAPI.Entities;
 
 namespace DanhGiaAPI.DTOs.Phieu4
 {
+    // Thay cho entity thô Phieu4NhaThau — gắn kèm bộ đoạn của riêng cột này.
+    public class Phieu4NhaThauDto
+    {
+        public int Id { get; set; }
+        public int PhieuId { get; set; }
+        public int NhaThauId { get; set; }
+        public int ThuTu { get; set; }
+        public List<DoanDto> Doan { get; set; } = new();
+    }
+
     public class Phieu4DongDto
     {
         public int Id { get; set; }
@@ -32,7 +43,7 @@ namespace DanhGiaAPI.DTOs.Phieu4
     public class Phieu4ResponseDto
     {
         public Phieu4TongHop Phieu { get; set; } = null!;
-        public List<Phieu4NhaThau> NhaThau { get; set; } = new();
+        public List<Phieu4NhaThauDto> NhaThau { get; set; } = new();
         public List<Phieu4BangDto> Bang { get; set; } = new();
     }
 }

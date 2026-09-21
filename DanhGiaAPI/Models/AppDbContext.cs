@@ -23,6 +23,7 @@ namespace DanhGiaAPI.Models
         public DbSet<Quyen> Quyen { get; set; }
         public DbSet<VaiTroQuyen> VaiTroQuyen { get; set; }
         public DbSet<PhongBan> PhongBan { get; set; }
+        public DbSet<PhongBanLoaiPhieu> PhongBanLoaiPhieu { get; set; }
         public DbSet<NhaThau> NhaThau { get; set; }
         public DbSet<NguoiDung> NguoiDung { get; set; }
         public DbSet<NguoiDungVaiTro> NguoiDungVaiTro { get; set; }
@@ -65,6 +66,10 @@ namespace DanhGiaAPI.Models
         public DbSet<Phieu3Bang2Dong> Phieu3Bang2Dong { get; set; }
         public DbSet<Phieu3Bang2GiaTri> Phieu3Bang2GiaTri { get; set; }
         public DbSet<Phieu3YKienNhaThau> Phieu3YKienNhaThau { get; set; }
+        // "Đoạn" thời gian (khung Ngày+Bữa ăn + danh sách địa điểm) thay thế
+        // suy luận "nhà ăn rõ ràng" cũ — xem Phieu3Service.
+        public DbSet<Phieu3Doan> Phieu3Doan { get; set; }
+        public DbSet<Phieu3DoanDiaDiem> Phieu3DoanDiaDiem { get; set; }
 
         // Giai đoạn 6 — Phiếu (4): Bảng tổng hợp đánh giá & phân bổ suất ăn (xem
         // 02. Phantich/modules/Phieu4_TongHopPhanBo.md)
@@ -73,6 +78,10 @@ namespace DanhGiaAPI.Models
         public DbSet<Phieu4Bang> Phieu4Bang { get; set; }
         public DbSet<Phieu4Dong> Phieu4Dong { get; set; }
         public DbSet<Phieu4GiaTri> Phieu4GiaTri { get; set; }
+        // "Đoạn" thời gian CỦA TỪNG CỘT nhà thầu (Phieu4NhaThau) — thay thế
+        // suy luận "địa điểm rõ ràng" cũ — xem Phieu4Service.
+        public DbSet<Phieu4Doan> Phieu4Doan { get; set; }
+        public DbSet<Phieu4DoanDiaDiem> Phieu4DoanDiaDiem { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -80,6 +89,7 @@ namespace DanhGiaAPI.Models
             modelBuilder.Entity<VaiTroQuyen>().HasKey(x => new { x.VaiTroId, x.QuyenId });
             modelBuilder.Entity<NguoiDungMauLuongKy>().HasKey(x => new { x.NguoiDungId, x.MauLuongKyId });
             modelBuilder.Entity<NguoiDungPhieuQuyen>().HasKey(x => new { x.NguoiDungId, x.LoaiPhieu });
+            modelBuilder.Entity<PhongBanLoaiPhieu>().HasKey(x => new { x.PhongBanId, x.LoaiPhieu });
 
             // Tên bảng có "_" (Phieu1_..., Phieu2_..., xem schema_module_danh_gia_nha_an.sql) khác
             // convention đặt tên entity C# (PascalCase liền, không "_") nên cần khai báo
@@ -100,12 +110,16 @@ namespace DanhGiaAPI.Models
             modelBuilder.Entity<Phieu3Bang2Dong>().ToTable("Phieu3_Bang2Dong");
             modelBuilder.Entity<Phieu3Bang2GiaTri>().ToTable("Phieu3_Bang2GiaTri");
             modelBuilder.Entity<Phieu3YKienNhaThau>().ToTable("Phieu3_YKienNhaThau");
+            modelBuilder.Entity<Phieu3Doan>().ToTable("Phieu3_Doan");
+            modelBuilder.Entity<Phieu3DoanDiaDiem>().ToTable("Phieu3_DoanDiaDiem");
 
             modelBuilder.Entity<Phieu4TongHop>().ToTable("Phieu4_TongHop");
             modelBuilder.Entity<Phieu4NhaThau>().ToTable("Phieu4_NhaThau");
             modelBuilder.Entity<Phieu4Bang>().ToTable("Phieu4_Bang");
             modelBuilder.Entity<Phieu4Dong>().ToTable("Phieu4_Dong");
             modelBuilder.Entity<Phieu4GiaTri>().ToTable("Phieu4_GiaTri");
+            modelBuilder.Entity<Phieu4Doan>().ToTable("Phieu4_Doan");
+            modelBuilder.Entity<Phieu4DoanDiaDiem>().ToTable("Phieu4_DoanDiaDiem");
         }
     }
 }

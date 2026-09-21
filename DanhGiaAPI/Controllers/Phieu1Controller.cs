@@ -32,7 +32,7 @@ namespace DanhGiaAPI.Controllers
                 throw new ApiException("Tài khoản nhà thầu không có quyền tạo phiếu mới", StatusCodes.Status403Forbidden);
         }
 
-        // GET api/phieu1?bepAnId=&phongBanId=&nhaThauId=&trangThai=&tuNgay=&denNgay=
+        // GET api/phieu1?bepAnId=&phongBanId=&nhaThauId=&trangThai=&tuNgay=&denNgay=&tuKhoa=&chiCuaToi=&page=&pageSize=
         [HttpGet]
         public async Task<IActionResult> DanhSach(
             [FromQuery] int? bepAnId,
@@ -40,16 +40,22 @@ namespace DanhGiaAPI.Controllers
             [FromQuery] int? nhaThauId,
             [FromQuery] string? trangThai,
             [FromQuery] DateTime? tuNgay,
-            [FromQuery] DateTime? denNgay)
+            [FromQuery] DateTime? denNgay,
+            [FromQuery] string? tuKhoa,
+            [FromQuery] bool chiCuaToi = false,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20)
         {
-            return Ok(await _phieu1Service.DanhSachAsync(bepAnId, phongBanId, nhaThauId, trangThai, tuNgay, denNgay, User.GetNhaThauId()));
+            return Ok(await _phieu1Service.DanhSachAsync(
+                bepAnId, phongBanId, nhaThauId, trangThai, tuNgay, denNgay, tuKhoa, chiCuaToi, page, pageSize,
+                User.GetNhaThauId(), User.GetNguoiDungId(), User.GetLaAdmin(), User.GetPhongBanId()));
         }
 
         // GET api/phieu1/5
         [HttpGet("{id}")]
         public async Task<IActionResult> ChiTiet(int id)
         {
-            return Ok(await _phieu1Service.ChiTietAsync(id, User.GetNhaThauId()));
+            return Ok(await _phieu1Service.ChiTietAsync(id, User.GetNhaThauId(), User.GetNguoiDungId(), User.GetLaAdmin(), User.GetPhongBanId()));
         }
 
         // POST api/phieu1
@@ -67,11 +73,12 @@ namespace DanhGiaAPI.Controllers
             return Ok(await _phieu1Service.SuaAsync(id, request));
         }
 
-        // DELETE api/phieu1/5 — chỉ khi phiếu đang NHAP
+        // DELETE api/phieu1/5 — chỉ khi phiếu đang NHAP, trừ Admin (xóa được ở
+        // mọi trạng thái, kèm dọn dẹp dữ liệu luồng ký liên quan)
         [HttpDelete("{id}")]
         public async Task<IActionResult> Xoa(int id)
         {
-            await _phieu1Service.XoaAsync(id);
+            await _phieu1Service.XoaAsync(id, User.GetLaAdmin());
             return Ok(new { message = "Đã xóa phiếu kiểm tra." });
         }
 

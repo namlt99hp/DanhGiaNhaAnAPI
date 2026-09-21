@@ -41,8 +41,12 @@ namespace DanhGiaAPI.Controllers
         public async Task<IActionResult> UploadCkeditor(IFormFile upload)
         {
             var tep = await _tepDinhKemService.UploadCkeditorAsync(upload, User.GetNguoiDungId());
-            var url = $"{Request.Scheme}://{Request.Host}{tep.DuongDanTep}";
-            return Ok(new { url });
+
+            // Trả về đường dẫn tương đối — FE tự ghép domain theo VITE_BASE_API của
+            // nó (xem ApiRootV2 trong LinkServerV2.tsx), không dựa vào Request.Host ở
+            // đây vì phía sau nginx sẽ không đáng tin cậy trừ khi nginx cấu hình
+            // forward đúng header gốc.
+            return Ok(new { url = tep.DuongDanTep });
         }
 
         // DELETE api/tep-dinh-kem/5

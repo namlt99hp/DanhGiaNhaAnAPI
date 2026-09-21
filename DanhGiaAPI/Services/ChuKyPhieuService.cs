@@ -4,6 +4,7 @@ using DanhGiaAPI.Entities;
 using DanhGiaAPI.Repositories.Interfaces;
 using DanhGiaAPI.Services.Interfaces;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 
 namespace DanhGiaAPI.Services
 {
@@ -17,6 +18,7 @@ namespace DanhGiaAPI.Services
         private readonly IMauLuongKyRepository _mauLuongKyRepository;
         private readonly INguoiDungMauLuongKyRepository _nguoiDungMauLuongKyRepository;
         private readonly INguoiDungRepository _nguoiDungRepository;
+        private readonly IChuKyNguoiDungRepository _chuKyNguoiDungRepository;
         private readonly IPhieuNhaThauResolver _phieuNhaThauResolver;
         private readonly IUnitOfWork _unitOfWork;
 
@@ -25,6 +27,7 @@ namespace DanhGiaAPI.Services
             IMauLuongKyRepository mauLuongKyRepository,
             INguoiDungMauLuongKyRepository nguoiDungMauLuongKyRepository,
             INguoiDungRepository nguoiDungRepository,
+            IChuKyNguoiDungRepository chuKyNguoiDungRepository,
             IPhieuNhaThauResolver phieuNhaThauResolver,
             IUnitOfWork unitOfWork)
         {
@@ -32,6 +35,7 @@ namespace DanhGiaAPI.Services
             _mauLuongKyRepository = mauLuongKyRepository;
             _nguoiDungMauLuongKyRepository = nguoiDungMauLuongKyRepository;
             _nguoiDungRepository = nguoiDungRepository;
+            _chuKyNguoiDungRepository = chuKyNguoiDungRepository;
             _phieuNhaThauResolver = phieuNhaThauResolver;
             _unitOfWork = unitOfWork;
         }
@@ -70,10 +74,52 @@ namespace DanhGiaAPI.Services
             await _unitOfWork.SaveChangesAsync();
         }
 
-        public async Task<List<ChuKyPhieu>> TienDoKyAsync(string loaiPhieu, int doiTuongId)
+        public async Task<List<ChuKyPhieuDto>> TienDoKyAsync(string loaiPhieu, int doiTuongId)
         {
-            var banGhiMoiNhat = await LayBanGhiMoiNhatAsync(loaiPhieu, doiTuongId);
-            return banGhiMoiNhat.OrderBy(x => x.BuocThuTu).ToList();
+            var banGhiMoiNhat = (await LayBanGhiMoiNhatAsync(loaiPhieu, doiTuongId))
+                .OrderBy(x => x.BuocThuTu).ToList();
+
+            var chuKyIds = banGhiMoiNhat.Where(x => x.ChuKyId.HasValue).Select(x => x.ChuKyId!.Value).Distinct().ToList();
+            var chuKyMap = chuKyIds.Count == 0
+                ? new Dictionary<int, string>()
+                : _chuKyNguoiDungRepository.Query().Where(x => chuKyIds.Contains(x.Id))
+                    .ToDictionary(x => x.Id, x => x.DuongDanChuKy);
+
+            // Nhà thầu không quản lý ảnh chữ ký trong hệ thống — luôn hiện
+            // icon √ thay vì ảnh, dù ChuKyId lỡ có giá trị (phòng thủ). Đồng
+            // thời resolve sẵn HỌ TÊN người ký ở đây — KHÔNG được tra qua
+            // "danh sách người đủ điều kiện ký" (DanhSachNguoiKyKhaDungAsync,
+            // dùng cho dropdown chọn) vì đó là khái niệm KHÁC (ai CÓ THỂ ký
+            // ngay bây giờ, có thể đã đổi/hết đúng điều kiện sau khi người
+            // này đã ký xong) — FE trước đây fallback về "#id" khi không tìm
+            // thấy trong danh sách đó.
+            var nguoiKyIds = banGhiMoiNhat
+                .SelectMany(x => new[] { x.NguoiKyId, x.NguoiKyDuKienId })
+                .Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToList();
+            var nguoiDungMap = nguoiKyIds.Count == 0
+                ? new Dictionary<int, NguoiDung>()
+                : _nguoiDungRepository.Query().Where(x => nguoiKyIds.Contains(x.Id)).ToDictionary(x => x.Id);
+
+            return banGhiMoiNhat.Select(b => new ChuKyPhieuDto
+            {
+                Id = b.Id,
+                LoaiDoiTuong = b.LoaiDoiTuong,
+                DoiTuongId = b.DoiTuongId,
+                BuocThuTu = b.BuocThuTu,
+                TenBuoc = b.TenBuoc,
+                NguoiKyId = b.NguoiKyId,
+                NguoiKyHoTen = b.NguoiKyId.HasValue ? nguoiDungMap.GetValueOrDefault(b.NguoiKyId.Value)?.HoTen : null,
+                NguoiKyDuKienId = b.NguoiKyDuKienId,
+                NguoiKyDuKienHoTen = b.NguoiKyDuKienId.HasValue ? nguoiDungMap.GetValueOrDefault(b.NguoiKyDuKienId.Value)?.HoTen : null,
+                ChuKyId = b.ChuKyId,
+                TrangThai = b.TrangThai,
+                GhiChu = b.GhiChu,
+                NgayKy = b.NgayKy,
+                LuotKy = b.LuotKy,
+                DuongDanChuKy = (b.ChuKyId.HasValue && b.NguoiKyId.HasValue && !(nguoiDungMap.GetValueOrDefault(b.NguoiKyId.Value)?.NhaThauId.HasValue ?? false))
+                    ? chuKyMap.GetValueOrDefault(b.ChuKyId.Value)
+                    : null,
+            }).ToList();
         }
 
         public async Task<string> TrangThaiTongAsync(string loaiPhieu, int doiTuongId)
@@ -113,18 +159,45 @@ namespace DanhGiaAPI.Services
 
             KiemTraNguoiKyDuKien(buoc, nguoiKyThucTe);
 
+            // FE không cho tự chọn ảnh chữ ký khi ký (chuKyId luôn null từ
+            // PhieuSignatures.tsx) — tự động dùng đúng ảnh "đang sử dụng" của
+            // NGƯỜI KÝ THỰC TẾ (nguoiKyThucTe, tính cả trường hợp ký thay).
+            chuKyId ??= await LayChuKyDangDungAsync(nguoiKyThucTe);
+
             buoc.TrangThai = "DA_DUYET";
             buoc.NguoiKyId = nguoiKyThucTe;
             buoc.ChuKyId = chuKyId;
             buoc.GhiChu = ghiChu;
             buoc.NgayKy = DateTime.Now;
             _chuKyPhieuRepository.Update(buoc);
-            await _unitOfWork.SaveChangesAsync();
+            await LuuKhongTrungLapAsync();
             return buoc;
+        }
+
+        // Ảnh chữ ký "đang sử dụng" của 1 tài khoản NỘI BỘ — dùng làm ChuKyId
+        // mặc định mỗi khi KyAsync ghi nhận 1 dòng ChuKyPhieu DA_DUYET. Nhà
+        // thầu không quản lý ảnh chữ ký trong hệ thống -> luôn null, FE hiện
+        // icon √ thay ảnh (xem TienDoKyAsync/PhieuSignatures.tsx).
+        private async Task<int?> LayChuKyDangDungAsync(int nguoiDungId)
+        {
+            var nguoiDung = await _nguoiDungRepository.GetByIdAsync(nguoiDungId);
+            if (nguoiDung == null || nguoiDung.NhaThauId.HasValue)
+                return null;
+
+            var chuKyDangDung = await _chuKyNguoiDungRepository.FirstOrDefaultAsync(
+                x => x.NguoiDungId == nguoiDungId && x.DangSuDung);
+            return chuKyDangDung?.Id;
         }
 
         public async Task<ChuKyPhieu> TuChoiAsync(int id, int nguoiKyId, string ghiChu)
         {
+            // [Required] trên TuChoiPhieuRequest.GhiChu chỉ chặn null/rỗng,
+            // không chặn chuỗi toàn khoảng trắng — chặn thêm ở đây để khớp
+            // đúng ràng buộc "bắt buộc ghi lý do" (FE cũng disable nút Từ
+            // chối theo cùng điều kiện .trim(), xem PhieuSignatures.tsx).
+            if (string.IsNullOrWhiteSpace(ghiChu))
+                throw new ApiException("Vui lòng nhập lý do từ chối");
+
             var buoc = await LayBuocDangChoKyAsync(id);
 
             await KiemTraQuyenKyAsync(buoc, nguoiKyId);
@@ -150,7 +223,7 @@ namespace DanhGiaAPI.Services
                 .ToList();
             _chuKyPhieuRepository.RemoveRange(cacBuocSau);
 
-            await _unitOfWork.SaveChangesAsync();
+            await LuuKhongTrungLapAsync();
             return buoc;
         }
 
@@ -288,8 +361,30 @@ namespace DanhGiaAPI.Services
 
             buoc.NguoiKyDuKienId = nguoiKyDuKienId;
             _chuKyPhieuRepository.Update(buoc);
-            await _unitOfWork.SaveChangesAsync();
+            await LuuKhongTrungLapAsync();
             return buoc;
+        }
+
+        // Bọc SaveChangesAsync cho các thao tác "chốt" 1 dòng ChuKyPhieu
+        // (Ký/Từ chối/Chỉ định người ký) — dùng RowVersion (xem
+        // Entities/ChuKyPhieu.cs) để phát hiện 2 người CÙNG đủ điều kiện thao
+        // tác gần như đồng thời lên CÙNG 1 bước (VD 2 tài khoản cùng nhà thầu
+        // cùng bấm Ký): request lưu TRƯỚC thắng bình thường; request lưu SAU
+        // nhận lỗi 409 rõ ràng thay vì âm thầm ghi đè chữ ký của người kia.
+        // FE (PhieuSignatures.tsx) hiển thị đúng message này và tự tải lại
+        // tiến độ ký (RTK Query invalidatesTags áp dụng cả khi request lỗi).
+        private async Task LuuKhongTrungLapAsync()
+        {
+            try
+            {
+                await _unitOfWork.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                throw new ApiException(
+                    "Bước này vừa được người khác xử lý xong trong lúc bạn đang thao tác — vui lòng tải lại để xem trạng thái mới nhất.",
+                    StatusCodes.Status409Conflict);
+            }
         }
 
         // Danh sách người đủ điều kiện ký 1 bước — dùng cho dropdown FE "chỉ

@@ -20,5 +20,11 @@ namespace DanhGiaAPI.DTOs.Phieu2
         public int? NguoiTao { get; set; }
         public string TrangThai { get; set; } = "NHAP";
         public DateTime NgayTao { get; set; }
+
+        // Họ tên người ký ĐÃ DUYỆT (lượt ký mới nhất) — phân biệt theo tài
+        // khoản ký có NhaThauId hay không, KHÔNG theo BuocThuTu (xem
+        // Phieu2Service.GanTenNguoiDaKyAsync). NULL khi chưa ai ký bước tương ứng.
+        public string? TenNhaThauDaKy { get; set; }
+        public string? TenNguoiDaKy { get; set; }
     }
 }

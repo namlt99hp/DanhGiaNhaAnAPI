@@ -1,4 +1,5 @@
 using DanhGiaAPI.Common;
+using DanhGiaAPI.DTOs.Common;
 using DanhGiaAPI.DTOs.Phieu3;
 using DanhGiaAPI.Entities;
 using DanhGiaAPI.Models;
@@ -56,17 +57,22 @@ namespace DanhGiaAPI.Services
         private readonly IPhieu3Bang2DongRepository     _bang2DongRepository;
         private readonly IPhieu3Bang2GiaTriRepository   _bang2GiaTriRepository;
         private readonly IPhieu3YKienNhaThauRepository  _yKienRepository;
+        private readonly IPhieu3DoanRepository          _doanRepository;
+        private readonly IPhieu3DoanDiaDiemRepository   _doanDiaDiemRepository;
+        private readonly IBuaAnRepository               _buaAnRepository;
         private readonly IPhieu2DanhGiaRepository       _phieu2Repository;
         private readonly IPhieu2TieuChiRepository       _phieu2TieuChiRepository;
-        private readonly IPhieu2NhaAnRepository         _phieu2NhaAnRepository;
         private readonly IPhieu1KiemTraRepository       _phieu1Repository;
         private readonly IPhieu1KetLuanRepository       _phieu1KetLuanRepository;
         private readonly IKetQuaDanhGiaRepository       _ketQuaDanhGiaRepository;
         private readonly IDuLieuComRepository           _duLieuComRepository;
         private readonly INhaThauRepository             _nhaThauRepository;
         private readonly IPhongBanRepository            _phongBanRepository;
+        private readonly INguoiDungPhieuQuyenRepository _nguoiDungPhieuQuyenRepository;
+        private readonly IQuyenXemPhieuService          _quyenXemPhieuService;
         private readonly ISoHieuService                 _soHieuService;
         private readonly IChuKyPhieuService              _chuKyPhieuService;
+        private readonly IChuKyPhieuRepository            _chuKyPhieuRepository;
         private readonly INhatKyChinhSuaService          _nhatKyChinhSuaService;
         private readonly IUnitOfWork                     _unitOfWork;
 
@@ -88,17 +94,22 @@ namespace DanhGiaAPI.Services
             IPhieu3Bang2DongRepository     bang2DongRepository,
             IPhieu3Bang2GiaTriRepository   bang2GiaTriRepository,
             IPhieu3YKienNhaThauRepository  yKienRepository,
+            IPhieu3DoanRepository          doanRepository,
+            IPhieu3DoanDiaDiemRepository   doanDiaDiemRepository,
+            IBuaAnRepository               buaAnRepository,
             IPhieu2DanhGiaRepository       phieu2Repository,
             IPhieu2TieuChiRepository       phieu2TieuChiRepository,
-            IPhieu2NhaAnRepository         phieu2NhaAnRepository,
             IPhieu1KiemTraRepository       phieu1Repository,
             IPhieu1KetLuanRepository       phieu1KetLuanRepository,
             IKetQuaDanhGiaRepository       ketQuaDanhGiaRepository,
             IDuLieuComRepository           duLieuComRepository,
             INhaThauRepository             nhaThauRepository,
             IPhongBanRepository            phongBanRepository,
+            INguoiDungPhieuQuyenRepository nguoiDungPhieuQuyenRepository,
+            IQuyenXemPhieuService          quyenXemPhieuService,
             ISoHieuService                 soHieuService,
             IChuKyPhieuService              chuKyPhieuService,
+            IChuKyPhieuRepository            chuKyPhieuRepository,
             INhatKyChinhSuaService          nhatKyChinhSuaService,
             IUnitOfWork                     unitOfWork)
         {
@@ -107,17 +118,22 @@ namespace DanhGiaAPI.Services
             _bang2DongRepository    = bang2DongRepository;
             _bang2GiaTriRepository  = bang2GiaTriRepository;
             _yKienRepository        = yKienRepository;
+            _doanRepository         = doanRepository;
+            _doanDiaDiemRepository  = doanDiaDiemRepository;
+            _buaAnRepository        = buaAnRepository;
             _phieu2Repository       = phieu2Repository;
             _phieu2TieuChiRepository = phieu2TieuChiRepository;
-            _phieu2NhaAnRepository  = phieu2NhaAnRepository;
             _phieu1Repository       = phieu1Repository;
             _phieu1KetLuanRepository = phieu1KetLuanRepository;
             _ketQuaDanhGiaRepository = ketQuaDanhGiaRepository;
             _duLieuComRepository    = duLieuComRepository;
             _nhaThauRepository      = nhaThauRepository;
             _phongBanRepository     = phongBanRepository;
+            _nguoiDungPhieuQuyenRepository = nguoiDungPhieuQuyenRepository;
+            _quyenXemPhieuService   = quyenXemPhieuService;
             _soHieuService          = soHieuService;
             _chuKyPhieuService      = chuKyPhieuService;
+            _chuKyPhieuRepository   = chuKyPhieuRepository;
             _nhatKyChinhSuaService  = nhatKyChinhSuaService;
             _unitOfWork             = unitOfWork;
         }
@@ -126,8 +142,39 @@ namespace DanhGiaAPI.Services
         // DANH SÁCH
         // ============================================================
 
-        public async Task<List<Phieu3BaoCao>> DanhSachAsync(int? nhaThauId, int? thang, int? nam, string? trangThai, int? nhaThauCuaNguoiGoi)
+        // Quyền "Đánh giá / nhập liệu" — cùng pattern Phieu1Service/Phieu2Service
+        // (trước đây Phiếu 3 KHÔNG có gate nào, mọi tài khoản nội bộ đều tạo
+        // được — xem VaiTro.md mục 10).
+        private async Task KiemTraQuyenDanhGiaAsync(int? nguoiDungId, bool laAdmin)
         {
+            if (laAdmin) return;
+
+            if (!nguoiDungId.HasValue || !await _nguoiDungPhieuQuyenRepository.AnyAsync(
+                    x => x.NguoiDungId == nguoiDungId.Value && x.LoaiPhieu == "PHIEU3" && x.DuocDanhGia))
+                throw new ApiException(
+                    "Bạn không có quyền tạo Phiếu 3 — liên hệ Admin để được phân quyền \"Đánh giá / nhập liệu\" ở mục Phân quyền theo Phiếu",
+                    StatusCodes.Status403Forbidden);
+        }
+
+        // Quyền XEM (danh sách + chi tiết) của tài khoản NỘI BỘ — nhà thầu có
+        // luật xem riêng (ép lọc theo nhaThauCuaNguoiGoi), không đi qua đây.
+        private async Task KiemTraQuyenXemAsync(int? nguoiDungId, bool laAdmin, int? nhaThauCuaNguoiGoi)
+        {
+            if (laAdmin || nhaThauCuaNguoiGoi.HasValue) return;
+
+            if (!nguoiDungId.HasValue || !await _quyenXemPhieuService.CoQuyenXemAsync(nguoiDungId.Value, "PHIEU3"))
+                throw new ApiException(
+                    "Bạn không có quyền truy cập Phiếu 3 — liên hệ Admin để được phân quyền ở mục Phân quyền theo Phiếu",
+                    StatusCodes.Status403Forbidden);
+        }
+
+        public async Task<PagedResultDto<Phieu3BaoCao>> DanhSachAsync(
+            int? nhaThauId, int? thang, int? nam, string? trangThai, DateTime? tuNgay, DateTime? denNgay,
+            string? tuKhoa, bool chiCuaToi, int page, int pageSize,
+            int? nhaThauCuaNguoiGoi, int? nguoiDungId, bool laAdmin)
+        {
+            await KiemTraQuyenXemAsync(nguoiDungId, laAdmin, nhaThauCuaNguoiGoi);
+
             var query = _phieuRepository.Query();
 
             if (nhaThauCuaNguoiGoi.HasValue) query = query.Where(x => x.NhaThauId == nhaThauCuaNguoiGoi);
@@ -136,18 +183,35 @@ namespace DanhGiaAPI.Services
             if (nam.HasValue)       query = query.Where(x => x.Nam == nam);
             if (!string.IsNullOrWhiteSpace(trangThai))
                 query = query.Where(x => x.TrangThai == trangThai);
+            // Phiếu 3 là báo cáo THEO THÁNG, không có ngày kiểm tra cụ thể —
+            // "khoảng ngày" ở đây lọc theo NGÀY TẠO báo cáo (NgayTao).
+            if (tuNgay.HasValue) query = query.Where(x => x.NgayTao >= tuNgay.Value.Date);
+            if (denNgay.HasValue) query = query.Where(x => x.NgayTao <= denNgay.Value.Date.AddDays(1).AddTicks(-1));
+            if (!string.IsNullOrWhiteSpace(tuKhoa)) query = query.Where(x => x.SoHieu.Contains(tuKhoa));
+            if (chiCuaToi && nguoiDungId.HasValue) query = query.Where(x => x.NguoiTao == nguoiDungId.Value);
 
-            return query.OrderByDescending(x => x.Nam)
+            var tongSo = query.Count();
+            var items = query.OrderByDescending(x => x.Nam)
                         .ThenByDescending(x => x.Thang)
                         .ThenByDescending(x => x.Id)
+                        .Skip((page - 1) * pageSize).Take(pageSize)
                         .ToList();
+            return new PagedResultDto<Phieu3BaoCao> { Items = items, TotalCount = tongSo, Page = page, PageSize = pageSize };
         }
 
         // ============================================================
         // CHI TIẾT
         // ============================================================
 
-        public async Task<Phieu3ResponseDto> ChiTietAsync(int id, int? nhaThauCuaNguoiGoi)
+        public async Task<Phieu3ResponseDto> ChiTietAsync(int id, int? nhaThauCuaNguoiGoi, int? nguoiDungId, bool laAdmin)
+        {
+            await KiemTraQuyenXemAsync(nguoiDungId, laAdmin, nhaThauCuaNguoiGoi);
+            return await LayChiTietAsync(id, nhaThauCuaNguoiGoi);
+        }
+
+        // Tách khỏi ChiTietAsync để các thao tác NỘI BỘ tự build lại response
+        // DTO sau khi ghi mà không phải soi lại quyền XEM (xem Phieu1Service).
+        private async Task<Phieu3ResponseDto> LayChiTietAsync(int id, int? nhaThauCuaNguoiGoi)
         {
             var phieu = await _phieuRepository.GetByIdAsync(id)
                 ?? throw new ApiException("Không tìm thấy báo cáo", StatusCodes.Status404NotFound);
@@ -175,6 +239,7 @@ namespace DanhGiaAPI.Services
             }).ToList();
 
             var yKien = await _yKienRepository.FirstOrDefaultAsync(x => x.PhieuId == id);
+            var doan = await BuildDoanDtoAsync(id);
 
             return new Phieu3ResponseDto
             {
@@ -182,15 +247,43 @@ namespace DanhGiaAPI.Services
                 Bang1 = bang1,
                 Bang2 = bang2,
                 YKienNhaThau = yKien,
+                Doan = doan,
             };
+        }
+
+        // Nạp "đoạn" + địa điểm của phiếu, resolve TuBuaAnCode/DenBuaAnCode để
+        // FE hiển thị không cần gọi thêm API BuaAn.
+        private async Task<List<DoanDto>> BuildDoanDtoAsync(int phieuId)
+        {
+            var doanEntities = (await _doanRepository.FindAsync(x => x.PhieuId == phieuId))
+                .OrderBy(x => x.TuNgay).ThenBy(x => x.Id).ToList();
+            if (doanEntities.Count == 0) return new List<DoanDto>();
+
+            var doanIds = doanEntities.Select(x => x.Id).ToList();
+            var diaDiem = await _doanDiaDiemRepository.FindAsync(x => doanIds.Contains(x.DoanId));
+            var buaAnTheoId = (await _buaAnRepository.GetAllAsync()).ToDictionary(b => b.ID, b => b.CodeBuaAn);
+
+            return doanEntities.Select(d => new DoanDto
+            {
+                Id = d.Id,
+                TuNgay = d.TuNgay,
+                TuBuaAnId = d.TuBuaAnId,
+                TuBuaAnCode = buaAnTheoId.TryGetValue(d.TuBuaAnId, out var tuMa) ? tuMa : null,
+                DenNgay = d.DenNgay,
+                DenBuaAnId = d.DenBuaAnId,
+                DenBuaAnCode = buaAnTheoId.TryGetValue(d.DenBuaAnId, out var denMa) ? denMa : null,
+                DiaDiemNhaAnIds = diaDiem.Where(x => x.DoanId == d.Id).Select(x => x.DiaDiemNhaAnId).ToList(),
+            }).ToList();
         }
 
         // ============================================================
         // TẠO MỚI
         // ============================================================
 
-        public async Task<Phieu3ResponseDto> ThemAsync(Phieu3Request request, int? nguoiTaoId)
+        public async Task<Phieu3ResponseDto> ThemAsync(Phieu3Request request, int? nguoiTaoId, bool laAdmin)
         {
+            await KiemTraQuyenDanhGiaAsync(nguoiTaoId, laAdmin);
+
             var nhaThau = await _nhaThauRepository.GetByIdAsync(request.NhaThauId)
                 ?? throw new ApiException("Không tìm thấy nhà thầu");
 
@@ -219,6 +312,7 @@ namespace DanhGiaAPI.Services
 
                 await KhoiTaoBang1RongAsync(phieu.Id);
                 await KhoiTaoBang2RongAsync(phieu.Id);
+                await TaoDoanAsync(phieu.Id, request.Doan);
                 await _unitOfWork.SaveChangesAsync();
 
                 await transaction.CommitAsync();
@@ -226,7 +320,7 @@ namespace DanhGiaAPI.Services
                 // Tính tự động ngay sau khi tạo (Bảng 1: LUOT_CBNV_THAM_GIA + TY_LE_PHAN_TRAM)
                 await TinhLaiAsync(phieu.Id);
 
-                return await ChiTietAsync(phieu.Id, null);
+                return await LayChiTietAsync(phieu.Id, null);
             }
             catch
             {
@@ -299,7 +393,7 @@ namespace DanhGiaAPI.Services
             }
 
             await _unitOfWork.SaveChangesAsync();
-            return await ChiTietAsync(id, null);
+            return await LayChiTietAsync(id, null);
         }
 
         // ============================================================
@@ -311,11 +405,8 @@ namespace DanhGiaAPI.Services
             var phieu = await _phieuRepository.GetByIdAsync(id)
                 ?? throw new ApiException("Không tìm thấy báo cáo", StatusCodes.Status404NotFound);
 
-            var danhSachPhieu2 = await _phieu2Repository.FindAsync(x =>
-                x.NhaThauId == phieu.NhaThauId && x.Thang == phieu.Thang && x.Nam == phieu.Nam);
-
-            var nhaAnRoRang = await LayNhaAnRoRangAsync(danhSachPhieu2, phieu.Thang, phieu.Nam);
-            var soLuotTheoMuc = await TinhSoLuotCbnvTheoMucAsync(nhaAnRoRang, phieu.Thang, phieu.Nam);
+            var doanCalc = await LayDoanCalcAsync(id);
+            var soLuotTheoMuc = await TinhSoLuotCbnvTheoMucTuDoanAsync(doanCalc);
             var tongLuot = soLuotTheoMuc[1] + soLuotTheoMuc[2] + soLuotTheoMuc[3] + soLuotTheoMuc[4] + soLuotTheoMuc[5];
 
             var bang1 = await _bang1Repository.FindAsync(x => x.PhieuId == id);
@@ -329,19 +420,19 @@ namespace DanhGiaAPI.Services
                 dongLuot.Diem4 = soLuotTheoMuc[4];
                 dongLuot.Diem5 = soLuotTheoMuc[5];
                 dongLuot.Tong  = tongLuot;
-                dongLuot.NguonDuLieu = $"Tự động: đếm KetQuaDanhGia (CBNV tự chấm qua kiosk) tại các Nhà ăn nhà thầu phụ trách, suy ra qua Phieu2_NhaAn (Tháng {phieu.Thang}/{phieu.Nam}, NhaThauId={phieu.NhaThauId})";
+                dongLuot.NguonDuLieu = "Tự động: đếm KetQuaDanhGia (CBNV tự chấm qua kiosk, theo ID_BuaAn) tại các địa điểm/đoạn thời gian đã khai báo";
                 _bang1Repository.Update(dongLuot);
             }
 
-            // Tổng suất ăn tại chỗ — tự động = tổng DuLieuCom.Com_ThucTe_ALL
-            // trong tháng, tại các Nhà ăn nhà thầu phụ trách (cùng tập
-            // "nhà ăn rõ ràng" dùng cho LUOT_CBNV_THAM_GIA).
+            // Tổng suất ăn tại chỗ — tự động = tổng DuLieuCom.Com_ThucTe_{Sang,
+            // Trua,Chieu,Dem} theo đúng biên bữa ăn của từng đoạn đã khai báo
+            // (thay cho suy luận "nhà ăn rõ ràng" cũ).
             var dongSuatAn = bang1.FirstOrDefault(x => x.MaDong == "TONG_SUAT_AN");
             if (dongSuatAn != null && !dongSuatAn.ChinhSuaThuCong)
             {
-                var tongSuatAn = await TinhTongSuatAnAsync(nhaAnRoRang, phieu.Thang, phieu.Nam);
+                var tongSuatAn = await TinhTongSuatAnTuDoanAsync(doanCalc);
                 dongSuatAn.Tong = tongSuatAn;
-                dongSuatAn.NguonDuLieu = $"Tự động: tổng DuLieuCom.Com_ThucTe_ALL tại các Nhà ăn nhà thầu phụ trách, suy ra qua Phieu2_NhaAn (Tháng {phieu.Thang}/{phieu.Nam}, NhaThauId={phieu.NhaThauId})";
+                dongSuatAn.NguonDuLieu = "Tự động: tổng DuLieuCom.Com_ThucTe_{Sang,Trua,Chieu,Dem} tại các địa điểm/đoạn thời gian đã khai báo";
                 _bang1Repository.Update(dongSuatAn);
             }
 
@@ -372,7 +463,7 @@ namespace DanhGiaAPI.Services
             await TinhLaiBang2Async(phieu);
 
             await _unitOfWork.SaveChangesAsync();
-            return await ChiTietAsync(id, null);
+            return await LayChiTietAsync(id, null);
         }
 
         // ============================================================
@@ -396,8 +487,11 @@ namespace DanhGiaAPI.Services
             var pbDoiNgoai = phongBanCanDung.FirstOrDefault(x => x.Ma == "PDN");
             var pbAtmt = phongBanCanDung.FirstOrDefault(x => x.Ma == "PATMT");
 
-            var tuNgay = new DateTime(phieu.Nam, phieu.Thang, 1);
-            var denNgay = tuNgay.AddMonths(1).AddDays(-1);
+            // Union ngày của TẤT CẢ đoạn đã khai báo cho phiếu này — thay cho
+            // lọc theo Thang/Nam cũ, vì đoạn có thể vượt ranh giới tháng (xác
+            // nhận nghiệp vụ). Bảng 2 KHÔNG quan tâm bữa ăn bắt đầu/kết thúc
+            // của đoạn, chỉ quan tâm Ngày.
+            var doanRanges = await LayDoanRangesAsync(phieu.Id);
 
             // ---- Dòng P.ĐN ----
             var dongDoiNgoai = pbDoiNgoai != null ? bang2Dong.FirstOrDefault(x => x.PhongBanId == pbDoiNgoai.Id) : null;
@@ -405,8 +499,12 @@ namespace DanhGiaAPI.Services
             {
                 var giaTriDoiNgoai = await _bang2GiaTriRepository.FindAsync(x => x.DongId == dongDoiNgoai.Id);
 
-                var phieu2CuaThang = await _phieu2Repository.FindAsync(x =>
-                    x.NhaThauId == phieu.NhaThauId && x.Thang == phieu.Thang && x.Nam == phieu.Nam);
+                // Chỉ tính từ Phiếu 2 đã DUYỆT — Nháp/Chờ ký chưa phải số liệu
+                // chính thức, không được đưa vào trung bình Bảng 2.
+                var phieu2CuaThang = (await _phieu2Repository.FindAsync(x =>
+                        x.NhaThauId == phieu.NhaThauId && x.TrangThai == "DA_DUYET"))
+                    .Where(x => x.ThoiGianTu.HasValue && TrongDoanNao(x.ThoiGianTu.Value.Date, doanRanges))
+                    .ToList();
                 var phieu2Ids = phieu2CuaThang.Select(x => x.Id).ToHashSet();
                 var tieuChiCuaThang = phieu2Ids.Count > 0
                     ? await _phieu2TieuChiRepository.FindAsync(x => phieu2Ids.Contains(x.PhieuId))
@@ -417,13 +515,30 @@ namespace DanhGiaAPI.Services
                     var oGiaTri = giaTriDoiNgoai.FirstOrDefault(x => x.MaTieuChi == maTc);
                     if (oGiaTri == null || oGiaTri.ChinhSuaThuCong) continue;
 
-                    var cacDiem = tieuChiCuaThang
-                        .Where(x => x.MaTieuChi == maPhieu2 && x.Diem.HasValue)
-                        .Select(x => x.Diem!.Value)
-                        .ToList();
-
-                    oGiaTri.GiaTri = cacDiem.Count > 0 ? Math.Round(cacDiem.Average(), 2) : null;
-                    oGiaTri.ThamChieuNguon = $"Tự động: TB Phieu2_TieuChi.Diem ({maPhieu2}) của các Phiếu 2 nhà thầu Tháng {phieu.Thang}/{phieu.Nam}";
+                    if (maTc == "TC1")
+                    {
+                        // VSATTP: Phieu2_TieuChi.Diem đã có sẵn điểm số thật (lấy từ
+                        // Phiếu 1 liên kết hoặc nhập tay khi Đạt) -> TB trực tiếp.
+                        var cacDiem = tieuChiCuaThang
+                            .Where(x => x.MaTieuChi == maPhieu2 && x.Diem.HasValue)
+                            .Select(x => x.Diem!.Value)
+                            .ToList();
+                        oGiaTri.GiaTri = cacDiem.Count > 0 ? Math.Round(cacDiem.Average(), 2) : null;
+                        oGiaTri.ThamChieuNguon = $"Tự động: TB Phieu2_TieuChi.Diem ({maPhieu2}) của các Phiếu 2 đã duyệt trong khoảng ngày các đoạn đã khai báo";
+                    }
+                    else
+                    {
+                        // Các tiêu chí còn lại (TC2/TC4/TC5/TC6) chỉ có Đạt/Không đạt ở
+                        // Phiếu 2, KHÔNG có điểm số -> quy đổi = số Phiếu 2 Đạt tiêu chí
+                        // này / số Phiếu 2 CÓ ĐÁNH GIÁ tiêu chí này (Dat hoặc KhongDat) ×
+                        // 5 — xác nhận nghiệp vụ 2026-09-14, sửa lại: Phiếu 2 BỎ TRỐNG
+                        // (chưa đánh giá) tiêu chí này KHÔNG còn bị tính ngầm là "không
+                        // đạt" nữa, loại hẳn khỏi cả tử số lẫn mẫu số.
+                        var soPhieuDanhGia = tieuChiCuaThang.Count(x => x.MaTieuChi == maPhieu2 && (x.Dat || x.KhongDat));
+                        var soLuongDat = tieuChiCuaThang.Count(x => x.MaTieuChi == maPhieu2 && x.Dat);
+                        oGiaTri.GiaTri = soPhieuDanhGia > 0 ? Math.Round((decimal)soLuongDat / soPhieuDanhGia * 5, 2) : null;
+                        oGiaTri.ThamChieuNguon = $"Tự động: Số Phiếu 2 Đạt ({maPhieu2}) / Số Phiếu 2 có đánh giá tiêu chí này (đã duyệt, trong khoảng ngày các đoạn đã khai báo) × 5";
+                    }
                     _bang2GiaTriRepository.Update(oGiaTri);
                 }
             }
@@ -436,9 +551,11 @@ namespace DanhGiaAPI.Services
                 var oTc1 = giaTriAtmt.FirstOrDefault(x => x.MaTieuChi == "TC1");
                 if (oTc1 != null && !oTc1.ChinhSuaThuCong)
                 {
-                    var phieu1CuaThang = await _phieu1Repository.FindAsync(x =>
-                        x.NhaThauId == phieu.NhaThauId && x.PhongBanId == pbAtmt.Id &&
-                        x.NgayKiemTra >= tuNgay && x.NgayKiemTra <= denNgay);
+                    // Chỉ tính từ Phiếu 1 đã DUYỆT — cùng quy tắc với Phiếu 2 ở trên.
+                    var phieu1CuaThang = (await _phieu1Repository.FindAsync(x =>
+                            x.NhaThauId == phieu.NhaThauId && x.PhongBanId == pbAtmt.Id && x.TrangThai == "DA_DUYET"))
+                        .Where(x => TrongDoanNao(x.NgayKiemTra.Date, doanRanges))
+                        .ToList();
                     var phieu1Ids = phieu1CuaThang.Select(x => x.Id).ToHashSet();
                     var ketLuanCuaThang = phieu1Ids.Count > 0
                         ? await _phieu1KetLuanRepository.FindAsync(x => phieu1Ids.Contains(x.PhieuId))
@@ -447,7 +564,7 @@ namespace DanhGiaAPI.Services
                     var cacDiem = ketLuanCuaThang.Where(x => x.DiemDanhGia.HasValue).Select(x => x.DiemDanhGia!.Value).ToList();
 
                     oTc1.GiaTri = cacDiem.Count > 0 ? Math.Round(cacDiem.Average(), 2) : null;
-                    oTc1.ThamChieuNguon = $"Tự động: TB Phieu1_KetLuan.DiemDanhGia của các Phiếu 1 do P.ATMT lập cho nhà thầu Tháng {phieu.Thang}/{phieu.Nam}";
+                    oTc1.ThamChieuNguon = "Tự động: TB Phieu1_KetLuan.DiemDanhGia của các Phiếu 1 do P.ATMT lập cho nhà thầu, trong khoảng ngày các đoạn đã khai báo";
                     _bang2GiaTriRepository.Update(oTc1);
                 }
             }
@@ -457,11 +574,12 @@ namespace DanhGiaAPI.Services
         // XÓA
         // ============================================================
 
-        public async Task XoaAsync(int id)
+        // laAdmin bypass ràng buộc trạng thái — xem Phieu1Service.XoaAsync.
+        public async Task XoaAsync(int id, bool laAdmin)
         {
             var phieu = await _phieuRepository.GetByIdAsync(id)
                 ?? throw new ApiException("Không tìm thấy báo cáo", StatusCodes.Status404NotFound);
-            if (phieu.TrangThai != "NHAP")
+            if (!laAdmin && phieu.TrangThai != "NHAP")
                 throw new ApiException("Chỉ có thể xóa báo cáo ở trạng thái Nháp");
 
             var bang1 = await _bang1Repository.FindAsync(x => x.PhieuId == id);
@@ -476,8 +594,72 @@ namespace DanhGiaAPI.Services
             var yKien = await _yKienRepository.FirstOrDefaultAsync(x => x.PhieuId == id);
             if (yKien != null) _yKienRepository.Remove(yKien);
 
+            var doan = await _doanRepository.FindAsync(x => x.PhieuId == id);
+            var doanIds = doan.Select(x => x.Id).ToList();
+            if (doanIds.Count > 0)
+            {
+                var doanDiaDiem = await _doanDiaDiemRepository.FindAsync(x => doanIds.Contains(x.DoanId));
+                _doanDiaDiemRepository.RemoveRange(doanDiaDiem);
+            }
+            _doanRepository.RemoveRange(doan);
+
+            var chuKy = await _chuKyPhieuRepository.FindAsync(x => x.LoaiDoiTuong == "PHIEU3" && x.DoiTuongId == id);
+            _chuKyPhieuRepository.RemoveRange(chuKy);
+
             _phieuRepository.Remove(phieu);
             await _unitOfWork.SaveChangesAsync();
+        }
+
+        // ============================================================
+        // THÊM / XÓA ĐOẠN THỜI GIAN (chỉ khi NHAP/TU_CHOI) — thao tác xong
+        // tính lại Bảng 1 ngay, cùng pattern ThemNhaThauAsync/XoaNhaThauAsync
+        // của Phiếu 4.
+        // ============================================================
+
+        public async Task<Phieu3ResponseDto> ThemDoanAsync(int id, DoanRequest request)
+        {
+            var phieu = await _phieuRepository.GetByIdAsync(id)
+                ?? throw new ApiException("Không tìm thấy báo cáo", StatusCodes.Status404NotFound);
+            if (phieu.TrangThai != "NHAP" && phieu.TrangThai != "TU_CHOI")
+                throw new ApiException("Chỉ có thể sửa đoạn khi báo cáo ở trạng thái Nháp hoặc Từ chối");
+
+            var buaAnThuTu = await LayBuaAnThuTuAsync();
+            KiemTraDoanHopLe(request, buaAnThuTu);
+
+            var doan = new Phieu3Doan
+            {
+                PhieuId = id,
+                TuNgay = request.TuNgay.Date,
+                TuBuaAnId = request.TuBuaAnId,
+                DenNgay = request.DenNgay.Date,
+                DenBuaAnId = request.DenBuaAnId,
+            };
+            await _doanRepository.AddAsync(doan);
+            await _unitOfWork.SaveChangesAsync();
+            foreach (var diaDiemId in request.DiaDiemNhaAnIds.Distinct())
+                await _doanDiaDiemRepository.AddAsync(new Phieu3DoanDiaDiem { DoanId = doan.Id, DiaDiemNhaAnId = diaDiemId });
+            await _unitOfWork.SaveChangesAsync();
+
+            return await TinhLaiAsync(id);
+        }
+
+        public async Task<Phieu3ResponseDto> XoaDoanAsync(int id, int doanId)
+        {
+            var phieu = await _phieuRepository.GetByIdAsync(id)
+                ?? throw new ApiException("Không tìm thấy báo cáo", StatusCodes.Status404NotFound);
+            if (phieu.TrangThai != "NHAP" && phieu.TrangThai != "TU_CHOI")
+                throw new ApiException("Chỉ có thể sửa đoạn khi báo cáo ở trạng thái Nháp hoặc Từ chối");
+
+            var doan = await _doanRepository.GetByIdAsync(doanId);
+            if (doan == null || doan.PhieuId != id)
+                throw new ApiException("Không tìm thấy đoạn", StatusCodes.Status404NotFound);
+
+            var diaDiem = await _doanDiaDiemRepository.FindAsync(x => x.DoanId == doanId);
+            _doanDiaDiemRepository.RemoveRange(diaDiem);
+            _doanRepository.Remove(doan);
+            await _unitOfWork.SaveChangesAsync();
+
+            return await TinhLaiAsync(id);
         }
 
         // ============================================================
@@ -533,77 +715,146 @@ namespace DanhGiaAPI.Services
             _yKienRepository.Update(yKien);
             await _unitOfWork.SaveChangesAsync();
 
-            return await ChiTietAsync(id, null);
+            return await LayChiTietAsync(id, null);
+        }
+
+        // ============================================================
+        // ĐOẠN THỜI GIAN — helper dùng chung cho Bảng 1 (thay thế hoàn toàn
+        // suy luận "nhà ăn rõ ràng" cũ)
+        // ============================================================
+
+        // Model tính toán nội bộ (không lưu DB) dựng từ Phieu3Doan +
+        // Phieu3DoanDiaDiem — TuThuTu/DenThuTu là thứ tự bữa ăn 1..4 (Sáng..Đêm).
+        private record DoanCalc(DateTime TuNgay, int TuThuTu, DateTime DenNgay, int DenThuTu, HashSet<int> DiaDiemIds);
+
+        // Bỏ dòng "ALL" (tổng cộng, dùng cho DuLieuCom.Com_ThucTe_ALL — không
+        // phải bữa ăn thật, CodeBuaAn không parse ra số được) — chỉ giữ 4 bữa
+        // Sáng/Trưa/Chiều/Đêm (CodeBuaAn "01".."04").
+        private async Task<Dictionary<int, int>> LayBuaAnThuTuAsync()
+        {
+            var buaAn = await _buaAnRepository.GetAllAsync();
+            return buaAn
+                .Where(b => int.TryParse(b.CodeBuaAn, out _))
+                .ToDictionary(b => b.ID, b => int.Parse(b.CodeBuaAn));
+        }
+
+        private async Task<List<DoanCalc>> LayDoanCalcAsync(int phieuId)
+        {
+            var doanEntities = await _doanRepository.FindAsync(x => x.PhieuId == phieuId);
+            if (doanEntities.Count == 0) return new List<DoanCalc>();
+
+            var doanIds = doanEntities.Select(x => x.Id).ToList();
+            var diaDiem = await _doanDiaDiemRepository.FindAsync(x => doanIds.Contains(x.DoanId));
+            var buaAnThuTu = await LayBuaAnThuTuAsync();
+
+            return doanEntities.Select(d => new DoanCalc(
+                d.TuNgay.Date,
+                buaAnThuTu.TryGetValue(d.TuBuaAnId, out var tu) ? tu : 1,
+                d.DenNgay.Date,
+                buaAnThuTu.TryGetValue(d.DenBuaAnId, out var den) ? den : 4,
+                diaDiem.Where(x => x.DoanId == d.Id).Select(x => x.DiaDiemNhaAnId).ToHashSet()
+            )).ToList();
+        }
+
+        private async Task<List<(DateTime TuNgay, DateTime DenNgay)>> LayDoanRangesAsync(int phieuId)
+        {
+            var doan = await _doanRepository.FindAsync(x => x.PhieuId == phieuId);
+            return doan.Select(d => (d.TuNgay.Date, d.DenNgay.Date)).ToList();
+        }
+
+        // Bảng 2 chỉ quan tâm NGÀY (không quan tâm bữa ăn bắt đầu/kết thúc của
+        // đoạn) — xác nhận nghiệp vụ.
+        private static bool TrongDoanNao(DateTime ngay, List<(DateTime TuNgay, DateTime DenNgay)> doanRanges) =>
+            doanRanges.Any(r => ngay >= r.TuNgay && ngay <= r.DenNgay);
+
+        // Biên bữa ăn (thứ tự 1..4) được tính cho 1 ngày cụ thể trong 1 đoạn —
+        // CẢ 2 đầu đoạn đều BAO GỒM bữa được chọn (xác nhận nghiệp vụ); ngày
+        // giữa đoạn tính đủ 4 bữa.
+        private static (int Min, int Max) BienBuaAnTrongNgay(DateTime ngay, DoanCalc doan)
+        {
+            var laNgayDau = ngay == doan.TuNgay;
+            var laNgayCuoi = ngay == doan.DenNgay;
+            if (laNgayDau && laNgayCuoi) return (doan.TuThuTu, doan.DenThuTu);
+            if (laNgayDau) return (doan.TuThuTu, 4);
+            if (laNgayCuoi) return (1, doan.DenThuTu);
+            return (1, 4);
+        }
+
+        private static void KiemTraDoanHopLe(DoanRequest req, Dictionary<int, int> buaAnThuTu)
+        {
+            if (!buaAnThuTu.ContainsKey(req.TuBuaAnId))
+                throw new ApiException("Bữa ăn bắt đầu không hợp lệ");
+            if (!buaAnThuTu.ContainsKey(req.DenBuaAnId))
+                throw new ApiException("Bữa ăn kết thúc không hợp lệ");
+
+            var tuNgay = req.TuNgay.Date;
+            var denNgay = req.DenNgay.Date;
+            var hopLe = tuNgay < denNgay || (tuNgay == denNgay && buaAnThuTu[req.TuBuaAnId] <= buaAnThuTu[req.DenBuaAnId]);
+            if (!hopLe)
+                throw new ApiException("Đoạn kết thúc phải sau đoạn bắt đầu");
+        }
+
+        // Tạo các đoạn khai báo lúc lập phiếu — dùng trong ThemAsync, bên
+        // trong transaction (mỗi đoạn cần Id thật trước khi thêm địa điểm con).
+        private async Task TaoDoanAsync(int phieuId, List<DoanRequest> danhSachDoan)
+        {
+            if (danhSachDoan.Count == 0) return;
+            var buaAnThuTu = await LayBuaAnThuTuAsync();
+
+            foreach (var req in danhSachDoan)
+            {
+                KiemTraDoanHopLe(req, buaAnThuTu);
+                var doan = new Phieu3Doan
+                {
+                    PhieuId = phieuId,
+                    TuNgay = req.TuNgay.Date,
+                    TuBuaAnId = req.TuBuaAnId,
+                    DenNgay = req.DenNgay.Date,
+                    DenBuaAnId = req.DenBuaAnId,
+                };
+                await _doanRepository.AddAsync(doan);
+                await _unitOfWork.SaveChangesAsync();
+                foreach (var diaDiemId in req.DiaDiemNhaAnIds.Distinct())
+                    await _doanDiaDiemRepository.AddAsync(new Phieu3DoanDiaDiem { DoanId = doan.Id, DiaDiemNhaAnId = diaDiemId });
+            }
         }
 
         // ============================================================
         // TÍNH SỐ LƯỢT ĐÁNH GIÁ CBNV (MỨC 1-5) TỪ KETQUADANHGIA (HỆ KIOSK CŨ)
         // ============================================================
         //
-        // Suy ra nhà thầu phụ trách 1 Nhà ăn (DiaDiemNhaAn) theo tháng qua
-        // Phieu2_NhaAn (tham chiếu logic tới DiaDiemNhaAn.ID — xác
-        // nhận nghiệp vụ 2026-08-27, xem modules/Phieu2_DanhGiaSuatAn.md).
-        // Thay cho proxy cũ (đếm Phieu2_KetQua.SoTieuChiDat — số tiêu chí
-        // "Đạt" trong checklist người đánh giá, không phải dữ liệu CBNV tự
-        // chấm) — xác nhận nghiệp vụ 2026-08-28.
-        //
-        // Quy tắc quy Nhà ăn về nhà thầu: Nhà ăn nào có Phiếu 2 của NHIỀU nhà
-        // thầu khác nhau trong cùng tháng thì bị LOẠI khỏi tính tự động cho
-        // TẤT CẢ nhà thầu (không đủ căn cứ quy về 1 bên, tránh đếm trùng/gán
-        // nhầm). Nhà ăn không có Phiếu 2 nào trong tháng cũng không tính được
-        // (không suy ra được thuộc nhà thầu nào).
-        // Suy ra tập DiaDiemNhaAnId "rõ ràng" (không dùng chung bởi nhiều nhà
-        // thầu khác nhau) mà 1 nhà thầu phụ trách trong tháng, qua
-        // Phieu2_NhaAn — dùng chung cho cả LUOT_CBNV_THAM_GIA lẫn TONG_SUAT_AN
-        // (xem quy tắc loại trừ ở comment trên TinhSoLuotCbnvTheoMucAsync).
-        private async Task<HashSet<int>> LayNhaAnRoRangAsync(
-            List<Phieu2DanhGia> danhSachPhieu2CuaNhaThau, int thang, int nam)
-        {
-            // 1 Phiếu 2 có thể gộp NHIỀU nhà ăn (Phieu2_NhaAn, xem
-            // Entities/Phieu2NhaAn.cs) — suy ra tập Nhà ăn của nhà thầu này qua
-            // TẤT CẢ nhà ăn nằm trong các Phiếu 2 của họ trong tháng.
-            var phieuIdsCuaNhaThau = danhSachPhieu2CuaNhaThau.Select(x => x.Id).ToList();
-            var lienKetCuaNhaThau = phieuIdsCuaNhaThau.Count > 0
-                ? await _phieu2NhaAnRepository.FindAsync(x => phieuIdsCuaNhaThau.Contains(x.PhieuId))
-                : new List<Phieu2NhaAn>();
-            var nhaAnCuaNhaThau = lienKetCuaNhaThau.Select(x => x.NhaAnId).Distinct().ToList();
-            if (nhaAnCuaNhaThau.Count == 0) return new HashSet<int>();
-
-            // Tất cả Phiếu 2 (MỌI nhà thầu) trong tháng, để xét "nhà ăn rõ ràng"
-            var phieu2CungThang = await _phieu2Repository.FindAsync(x => x.Thang == thang && x.Nam == nam);
-            var phieu2CungThangIds = phieu2CungThang.Select(x => x.Id).ToList();
-            var nhaThauCuaPhieu = phieu2CungThang.ToDictionary(x => x.Id, x => x.NhaThauId);
-
-            var lienKetCungThang = phieu2CungThangIds.Count > 0
-                ? await _phieu2NhaAnRepository.FindAsync(x =>
-                    phieu2CungThangIds.Contains(x.PhieuId) && nhaAnCuaNhaThau.Contains(x.NhaAnId))
-                : new List<Phieu2NhaAn>();
-
-            return nhaAnCuaNhaThau
-                .Where(nhaAnId => lienKetCungThang
-                    .Where(l => l.NhaAnId == nhaAnId)
-                    .Select(l => nhaThauCuaPhieu[l.PhieuId])
-                    .Distinct()
-                    .Count() == 1)
-                .ToHashSet();
-        }
-
-        private async Task<decimal[]> TinhSoLuotCbnvTheoMucAsync(HashSet<int> nhaAnRoRang, int thang, int nam)
+        // ID_BuaAn đã được gán đáng tin cậy ngay lúc kiosk ghi bản ghi (xem
+        // EvaluatesController.Post — tra KhungGioDanhGia theo giờ hiện tại;
+        // nếu giờ nộp nằm ngoài cả 4 khung giờ thì bản ghi KHÔNG được lưu vào
+        // DB) — nên đọc thẳng ID_BuaAn, KHÔNG cần re-derive qua KhungGioDanhGia
+        // ở đây. Cộng theo đúng biên bữa ăn của từng đoạn/địa điểm đã khai báo
+        // (thay thế hoàn toàn suy luận "nhà ăn rõ ràng" cũ).
+        private async Task<decimal[]> TinhSoLuotCbnvTheoMucTuDoanAsync(List<DoanCalc> doanList)
         {
             var soLuot = new decimal[6]; // [0] không dùng, [1..5]
-            if (nhaAnRoRang.Count == 0) return soLuot;
+            if (doanList.Count == 0) return soLuot;
+            var diaDiemIds = doanList.SelectMany(d => d.DiaDiemIds).Distinct().ToList();
+            if (diaDiemIds.Count == 0) return soLuot;
 
-            var tuNgay = new DateTime(nam, thang, 1);
-            var denNgay = tuNgay.AddMonths(1).AddDays(-1);
+            var tuNgayNhoNhat = doanList.Min(d => d.TuNgay);
+            var denNgayLonNhat = doanList.Max(d => d.DenNgay);
+            var ketQua = await _ketQuaDanhGiaRepository.FindAsync(x =>
+                diaDiemIds.Contains(x.DiaDiem_ID) &&
+                x.ThoiGianDanhGia.Date >= tuNgayNhoNhat && x.ThoiGianDanhGia.Date <= denNgayLonNhat);
+            var buaAnThuTu = await LayBuaAnThuTuAsync();
 
-            var ketQuaCbnv = await _ketQuaDanhGiaRepository.FindAsync(x =>
-                nhaAnRoRang.Contains(x.DiaDiem_ID) &&
-                x.ThoiGianDanhGia.Date >= tuNgay &&
-                x.ThoiGianDanhGia.Date <= denNgay);
-
-            foreach (var kq in ketQuaCbnv)
+            foreach (var doan in doanList)
             {
-                if (kq.DiemDanhGia is >= 1 and <= 5) soLuot[kq.DiemDanhGia]++;
+                if (doan.DiaDiemIds.Count == 0) continue;
+                var rowsCuaDoan = ketQua.Where(r =>
+                    doan.DiaDiemIds.Contains(r.DiaDiem_ID) && r.ThoiGianDanhGia.Date >= doan.TuNgay && r.ThoiGianDanhGia.Date <= doan.DenNgay);
+                foreach (var row in rowsCuaDoan)
+                {
+                    if (row.DiemDanhGia is < 1 or > 5) continue;
+                    if (!row.ID_BuaAn.HasValue || !buaAnThuTu.TryGetValue(row.ID_BuaAn.Value, out var thuTu)) continue; // phòng thủ, không nên xảy ra
+                    var (min, max) = BienBuaAnTrongNgay(row.ThoiGianDanhGia.Date, doan);
+                    if (thuTu >= min && thuTu <= max) soLuot[row.DiemDanhGia]++;
+                }
             }
             return soLuot;
         }
@@ -612,21 +863,44 @@ namespace DanhGiaAPI.Services
         // TÍNH TỔNG SUẤT ĂN TỪ DULIEUCOM (HỆ ĐĂNG KÝ CƠM CŨ)
         // ============================================================
         //
-        // Tổng DuLieuCom.Com_ThucTe_ALL trong tháng, tại các Nhà ăn "rõ ràng"
-        // (ID_DiemAn = DiaDiemNhaAn.ID) mà nhà thầu này phụ trách — cùng tập
-        // nhaAnRoRang dùng cho TinhSoLuotCbnvTheoMucAsync (xem LayNhaAnRoRangAsync).
-        private async Task<int> TinhTongSuatAnAsync(HashSet<int> nhaAnRoRang, int thang, int nam)
+        // Mapping CodeBuaAn -> field DuLieuCom PHẢI theo TÊN (không theo thứ
+        // tự khai báo field trong class — field là ALL,Sang,Trua,Dem,Chieu,
+        // Đêm khai TRƯỚC Chiều, khác thứ tự thời gian thật 03=Chiều,04=Đêm) —
+        // khớp đúng cách RiceDataController gán dữ liệu gốc từ hệ ngoài.
+        private static int? ComTheoMa(DuLieuCom d, int thuTu) => thuTu switch
         {
-            if (nhaAnRoRang.Count == 0) return 0;
+            1 => d.Com_ThucTe_Sang,
+            2 => d.Com_ThucTe_Trua,
+            3 => d.Com_ThucTe_Chieu,
+            4 => d.Com_ThucTe_Dem,
+            _ => null,
+        };
 
-            var tuNgay = new DateTime(nam, thang, 1);
-            var denNgay = tuNgay.AddMonths(1).AddDays(-1);
+        private async Task<int> TinhTongSuatAnTuDoanAsync(List<DoanCalc> doanList)
+        {
+            if (doanList.Count == 0) return 0;
+            var diaDiemIds = doanList.SelectMany(d => d.DiaDiemIds).Distinct().ToList();
+            if (diaDiemIds.Count == 0) return 0;
 
+            var tuNgayNhoNhat = doanList.Min(d => d.TuNgay);
+            var denNgayLonNhat = doanList.Max(d => d.DenNgay);
             var duLieuCom = await _duLieuComRepository.FindAsync(x =>
-                nhaAnRoRang.Contains(x.ID_DiemAn) &&
-                x.Ngay >= tuNgay && x.Ngay <= denNgay);
+                diaDiemIds.Contains(x.ID_DiemAn) && x.Ngay.Date >= tuNgayNhoNhat && x.Ngay.Date <= denNgayLonNhat);
 
-            return duLieuCom.Sum(x => x.Com_ThucTe_ALL ?? 0);
+            var tong = 0;
+            foreach (var doan in doanList)
+            {
+                if (doan.DiaDiemIds.Count == 0) continue;
+                var rowsCuaDoan = duLieuCom.Where(r =>
+                    doan.DiaDiemIds.Contains(r.ID_DiemAn) && r.Ngay.Date >= doan.TuNgay && r.Ngay.Date <= doan.DenNgay);
+                foreach (var row in rowsCuaDoan)
+                {
+                    var (min, max) = BienBuaAnTrongNgay(row.Ngay.Date, doan);
+                    for (var thuTu = min; thuTu <= max; thuTu++)
+                        tong += ComTheoMa(row, thuTu) ?? 0;
+                }
+            }
+            return tong;
         }
 
         // ============================================================

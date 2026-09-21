@@ -15,6 +15,8 @@ namespace DanhGiaAPI.Services
         private readonly IMauLuongKyRepository _mauLuongKyRepository;
         private readonly INguoiDungMauLuongKyRepository _nguoiDungMauLuongKyRepository;
         private readonly INguoiDungPhieuQuyenRepository _nguoiDungPhieuQuyenRepository;
+        private readonly IPhongBanLoaiPhieuRepository _phongBanLoaiPhieuRepository;
+        private readonly IQuyenXemPhieuService _quyenXemPhieuService;
         private readonly IChuKyNguoiDungRepository _chuKyNguoiDungRepository;
         private readonly IPhienDangNhapRepository _phienDangNhapRepository;
         private readonly IChuKyPhieuRepository _chuKyPhieuRepository;
@@ -32,6 +34,8 @@ namespace DanhGiaAPI.Services
             IMauLuongKyRepository mauLuongKyRepository,
             INguoiDungMauLuongKyRepository nguoiDungMauLuongKyRepository,
             INguoiDungPhieuQuyenRepository nguoiDungPhieuQuyenRepository,
+            IPhongBanLoaiPhieuRepository phongBanLoaiPhieuRepository,
+            IQuyenXemPhieuService quyenXemPhieuService,
             IChuKyNguoiDungRepository chuKyNguoiDungRepository,
             IPhienDangNhapRepository phienDangNhapRepository,
             IChuKyPhieuRepository chuKyPhieuRepository,
@@ -48,6 +52,8 @@ namespace DanhGiaAPI.Services
             _mauLuongKyRepository = mauLuongKyRepository;
             _nguoiDungMauLuongKyRepository = nguoiDungMauLuongKyRepository;
             _nguoiDungPhieuQuyenRepository = nguoiDungPhieuQuyenRepository;
+            _phongBanLoaiPhieuRepository = phongBanLoaiPhieuRepository;
+            _quyenXemPhieuService = quyenXemPhieuService;
             _chuKyNguoiDungRepository = chuKyNguoiDungRepository;
             _phienDangNhapRepository = phienDangNhapRepository;
             _chuKyPhieuRepository = chuKyPhieuRepository;
@@ -68,6 +74,45 @@ namespace DanhGiaAPI.Services
                 throw new ApiException("Tài khoản chỉ được thuộc 1 trong 2: Phòng ban hoặc Nhà thầu, không được cả hai");
         }
 
+        // "Trần" nghiệp vụ cố định cho MỌI tài khoản nhà thầu — không cấu hình
+        // được qua UI (khác phòng ban, xem PhongBanLoaiPhieu): nhà thầu chỉ
+        // liên quan Phiếu 1, 2, và chỉ ở vai trò KÝ (không bao giờ có Đánh
+        // giá/nhập liệu hay Quản lý tiêu chí — xem VaiTro.md mục 10).
+        private static readonly HashSet<string> LOAI_PHIEU_NHA_THAU_DUOC_KY = new() { "PHIEU1", "PHIEU2" };
+        private static readonly string[] DS_LOAI_PHIEU_TAT_CA = { "PHIEU1", "PHIEU2", "PHIEU3", "PHIEU4" };
+
+        // "Trần" cấu trúc (KHÔNG phải quyền thật) — loại phiếu tài khoản này
+        // ĐƯỢC PHÉP cấu hình Đánh giá/Quản lý tiêu chí/Ký. Nhà thầu: cố định
+        // {PHIEU1,PHIEU2}. Phòng ban: theo PhongBanLoaiPhieu đã cấu hình, hoặc
+        // KHÔNG GIỚI HẠN (cả 4) nếu phòng ban đó chưa cấu hình gì (an toàn khi
+        // rollout — xem migration_phongban_loaiphieu.sql).
+        private static List<string> TinhLoaiPhieuApDung(NguoiDung nguoiDung, Dictionary<int, List<string>> phongBanLoaiPhieuMap)
+        {
+            if (nguoiDung.NhaThauId.HasValue)
+                return LOAI_PHIEU_NHA_THAU_DUOC_KY.ToList();
+
+            if (nguoiDung.PhongBanId.HasValue)
+            {
+                var cauHinh = phongBanLoaiPhieuMap.GetValueOrDefault(nguoiDung.PhongBanId.Value) ?? new();
+                return cauHinh.Count > 0 ? cauHinh : DS_LOAI_PHIEU_TAT_CA.ToList();
+            }
+
+            return DS_LOAI_PHIEU_TAT_CA.ToList();
+        }
+
+        private async Task<List<string>> TinhLoaiPhieuApDungAsync(NguoiDung nguoiDung)
+        {
+            var map = new Dictionary<int, List<string>>();
+            if (nguoiDung.PhongBanId.HasValue)
+                map[nguoiDung.PhongBanId.Value] = (await _phongBanLoaiPhieuRepository.GetByPhongBanIdAsync(nguoiDung.PhongBanId.Value))
+                    .Select(x => x.LoaiPhieu).ToList();
+
+            return TinhLoaiPhieuApDung(nguoiDung, map);
+        }
+
+        private async Task<bool> PhieuNamTrongTranAsync(NguoiDung nguoiDung, string loaiPhieu) =>
+            (await TinhLoaiPhieuApDungAsync(nguoiDung)).Contains(loaiPhieu);
+
         public async Task<List<NguoiDungListItemDto>> DanhSachAsync(string? trangThai, int? phongBanId, int? nhaThauId)
         {
             // Nhiều filter tùy chọn -> dùng escape hatch Query() thay vì đẻ
@@ -86,9 +131,42 @@ namespace DanhGiaAPI.Services
 
             var vaiTroMap = await _nguoiDungVaiTroRepository.GetVaiTroMapNhieuNguoiDungAsync(ids);
 
+            // Nạp theo BATCH (không phải N+1) — dữ liệu này cần cho modal
+            // "Phân quyền theo Phiếu" mở từ ĐÚNG dòng trong bảng danh sách
+            // (QuanLyTaiKhoanPageV2.tsx truyền thẳng row, không gọi lại
+            // ChiTietAsync), nên DanhSachAsync bắt buộc phải trả đủ, không chỉ
+            // để trống như trước.
+            var phieuQuyenMap = _nguoiDungPhieuQuyenRepository.Query()
+                .Where(x => ids.Contains(x.NguoiDungId))
+                .ToList()
+                .GroupBy(x => x.NguoiDungId)
+                .ToDictionary(g => g.Key, g => g.Select(x => new NguoiDungPhieuQuyenItemDto
+                {
+                    LoaiPhieu = x.LoaiPhieu,
+                    DuocDanhGia = x.DuocDanhGia,
+                    DuocQuanLyTieuChi = x.DuocQuanLyTieuChi
+                }).ToList());
+
+            var mauLuongKyMap = _nguoiDungMauLuongKyRepository.Query()
+                .Where(x => ids.Contains(x.NguoiDungId))
+                .ToList()
+                .GroupBy(x => x.NguoiDungId)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.MauLuongKyId).ToList());
+
+            // Bảng PhongBanLoaiPhieu rất nhỏ (vài dòng cấu hình) -> nạp hết 1
+            // lần rồi tính "trần" của từng dòng trong bộ nhớ, tránh 1 query
+            // riêng/user.
+            var phongBanLoaiPhieuMap = _phongBanLoaiPhieuRepository.Query()
+                .ToList()
+                .GroupBy(x => x.PhongBanId)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.LoaiPhieu).ToList());
+
             return danhSach.Select(nd => MapToDto(
                 nd,
-                vaiTroMap.Where(x => x.NguoiDungId == nd.Id).Select(x => x.Ma).ToList()
+                vaiTroMap.Where(x => x.NguoiDungId == nd.Id).Select(x => x.Ma).ToList(),
+                mauLuongKyMap.GetValueOrDefault(nd.Id, new()),
+                phieuQuyenMap.GetValueOrDefault(nd.Id, new()),
+                TinhLoaiPhieuApDung(nd, phongBanLoaiPhieuMap)
             )).ToList();
         }
 
@@ -105,8 +183,10 @@ namespace DanhGiaAPI.Services
                     DuocDanhGia = x.DuocDanhGia,
                     DuocQuanLyTieuChi = x.DuocQuanLyTieuChi
                 }).ToList();
+            var loaiPhieuApDung = await TinhLoaiPhieuApDungAsync(nguoiDung);
+            var danhSachLoaiPhieuDuocXem = await _quyenXemPhieuService.DanhSachLoaiPhieuDuocXemAsync(id);
 
-            return MapToDto(nguoiDung, vaiTro.Select(x => x.Ma).ToList(), mauLuongKyIds, phieuQuyen);
+            return MapToDto(nguoiDung, vaiTro.Select(x => x.Ma).ToList(), mauLuongKyIds, phieuQuyen, loaiPhieuApDung, danhSachLoaiPhieuDuocXem);
         }
 
         // Admin tạo trực tiếp 1 tài khoản (khác DangKyAsync ở AuthService — tự
@@ -307,7 +387,9 @@ namespace DanhGiaAPI.Services
             NguoiDung nd,
             List<string> maVaiTro,
             List<int>? mauLuongKyIds = null,
-            List<NguoiDungPhieuQuyenItemDto>? phieuQuyen = null) => new()
+            List<NguoiDungPhieuQuyenItemDto>? phieuQuyen = null,
+            List<string>? loaiPhieuApDung = null,
+            List<string>? danhSachLoaiPhieuDuocXem = null) => new()
         {
             Id = nd.Id,
             TenDangNhap = nd.TenDangNhap,
@@ -322,7 +404,9 @@ namespace DanhGiaAPI.Services
             NgayTao = nd.NgayTao,
             DanhSachVaiTro = maVaiTro,
             DanhSachMauLuongKyId = mauLuongKyIds ?? new(),
-            PhieuQuyen = phieuQuyen ?? new()
+            PhieuQuyen = phieuQuyen ?? new(),
+            LoaiPhieuApDung = loaiPhieuApDung ?? DS_LOAI_PHIEU_TAT_CA.ToList(),
+            DanhSachLoaiPhieuDuocXem = danhSachLoaiPhieuDuocXem ?? new()
         };
 
         // "Đủ điều kiện CẤU TRÚC" để gán user này vào 1 bước ký cụ thể — không
@@ -347,6 +431,7 @@ namespace DanhGiaAPI.Services
                 .OrderBy(x => x.LoaiPhieu).ThenBy(x => x.BuocThuTu).ToList();
             var daGan = (await _nguoiDungMauLuongKyRepository.GetByNguoiDungIdAsync(id))
                 .Select(x => x.MauLuongKyId).ToHashSet();
+            var loaiPhieuApDung = await TinhLoaiPhieuApDungAsync(nguoiDung);
 
             return tatCaBuoc.Select(b => new MauLuongKyKhaDungDto
             {
@@ -356,6 +441,7 @@ namespace DanhGiaAPI.Services
                 TenBuoc = b.TenBuoc,
                 LoaiNguoiKy = b.LoaiNguoiKy,
                 DuDieuKienCauTruc = DuDieuKienCauTruc(b, nguoiDung),
+                DuDieuKienPhongBan = loaiPhieuApDung.Contains(b.LoaiPhieu),
                 DaDuocGan = daGan.Contains(b.Id)
             }).ToList();
         }
@@ -375,6 +461,11 @@ namespace DanhGiaAPI.Services
                 if (!DuDieuKienCauTruc(buoc, nguoiDung))
                     throw new ApiException(
                         $"Tài khoản không đủ điều kiện phòng ban/nhà thầu để gán vào bước \"{buoc.TenBuoc}\" ({buoc.LoaiPhieu})");
+
+                if (!await PhieuNamTrongTranAsync(nguoiDung, buoc.LoaiPhieu))
+                    throw new ApiException(
+                        $"Phòng ban/Nhà thầu của tài khoản không xử lý {buoc.LoaiPhieu} — không thể gán ký bước \"{buoc.TenBuoc}\". " +
+                        "Nếu cần mở rộng, cấu hình lại ở màn \"Phòng ban\".");
             }
 
             var hienTai = await _nguoiDungMauLuongKyRepository.GetByNguoiDungIdAsync(id);
@@ -390,7 +481,22 @@ namespace DanhGiaAPI.Services
         // (CapNhatLuongKyAsync) và quyền quản trị (CapNhatVaiTroAsync).
         public async Task CapNhatPhieuQuyenAsync(int id, List<NguoiDungPhieuQuyenItemDto> danhSach)
         {
-            await TimHoacLoiAsync(id);
+            var nguoiDung = await TimHoacLoiAsync(id);
+
+            foreach (var item in danhSach.Where(x => x.DuocDanhGia || x.DuocQuanLyTieuChi))
+            {
+                // Nhà thầu chỉ được cấp quyền KÝ (CapNhatLuongKyAsync) — không
+                // bao giờ có Đánh giá/nhập liệu hay Quản lý tiêu chí, bất kể
+                // loại phiếu nào (xem VaiTro.md mục 10).
+                if (nguoiDung.NhaThauId.HasValue)
+                    throw new ApiException(
+                        "Tài khoản nhà thầu chỉ được cấp quyền Ký (hoặc từ chối) — không được Đánh giá/nhập liệu hoặc Quản lý tiêu chí.");
+
+                if (!await PhieuNamTrongTranAsync(nguoiDung, item.LoaiPhieu.Trim()))
+                    throw new ApiException(
+                        $"Phòng ban của tài khoản không xử lý {item.LoaiPhieu} — không thể cấp quyền Đánh giá/nhập liệu " +
+                        "hoặc Quản lý tiêu chí cho loại phiếu này. Nếu cần mở rộng, cấu hình lại ở màn \"Phòng ban\".");
+            }
 
             var hienTai = await _nguoiDungPhieuQuyenRepository.GetByNguoiDungIdAsync(id);
             _nguoiDungPhieuQuyenRepository.RemoveRange(hienTai);

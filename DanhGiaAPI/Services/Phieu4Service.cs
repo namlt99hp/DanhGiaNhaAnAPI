@@ -1,4 +1,5 @@
 using DanhGiaAPI.Common;
+using DanhGiaAPI.DTOs.Common;
 using DanhGiaAPI.DTOs.Phieu4;
 using DanhGiaAPI.Entities;
 using DanhGiaAPI.Models;
@@ -11,18 +12,26 @@ namespace DanhGiaAPI.Services
     // Xem quyết định thiết kế + các giả định nghiệp vụ đã xác nhận tại
     // 02. Phantich/modules/Phieu4_TongHopPhanBo.md.
     //
+    // ĐỔI LỚN (xem 02. Phantich/migration_phieu3_phieu4_doan_thoi_gian.sql):
+    // Bảng 1 KHÔNG còn suy luận "địa điểm rõ ràng" từ Phiếu 2 trên 1 khoảng
+    // ngày liên tục [TuNgay,DenNgay] duy nhất của cả phiếu nữa — 1 nhà thầu
+    // có thể đổi tập địa điểm phụ trách GIỮA kỳ báo cáo, suy luận theo khối
+    // ngày duy nhất tính sai ở ranh giới đổi địa điểm. Thay bằng khai báo
+    // TƯỜNG MINH: mỗi CỘT nhà thầu (Phieu4_NhaThau) có 1 bộ "đoạn" thời gian
+    // riêng (Phieu4_Doan + Phieu4_DoanDiaDiem — khung (Ngày,Bữa ăn) bắt đầu ->
+    // (Ngày,Bữa ăn) kết thúc, CẢ 2 ĐẦU bao gồm bữa được chọn, + danh sách địa
+    // điểm áp dụng), tương đương mỗi cột là 1 "Phiếu 3 con". Xem
+    // ThemDoanAsync/XoaDoanAsync + các hàm *TuDoanAsync bên dưới.
+    //
     // Bảng 1 (cấu trúc CỐ ĐỊNH — 4 nhóm dòng, giống mục 5.8 PhanTichNghiepVu.md):
-    //   Nhóm 1 (1 dòng "Tổng số suất ăn"): TỰ ĐỘNG (đổi nguồn từ nhập tay,
-    //     giống TONG_SUAT_AN của Phiếu 3) — tổng DuLieuCom.Com_ThucTe_ALL
-    //     trong [TuNgay, DenNgay], tại các Nhà ăn nhà thầu phụ trách, suy ra
-    //     qua Phieu2_NhaAn (cùng tập "nhà ăn rõ ràng" dùng cho Nhóm 2, xem
-    //     LayDiaDiemRoRangCuaNhaThauAsync + TinhTongSuatAnAsync).
-    //   Nhóm 2 (5 dòng "Số lượt đánh giá mức 1..5"): TỰ ĐỘNG (đổi nguồn
-    //     2026-08-28) — đếm KetQuaDanhGia (hệ kiosk CBNV tự chấm 1-5) tại các
-    //     Nhà ăn nhà thầu phụ trách trong [TuNgay, DenNgay], suy ra qua
-    //     Phieu2_DanhGia.NhaAnId — xem TinhSoLuotCbnvTheoMucAsync. Trước đây
-    //     dùng proxy Phieu2_KetQua.SoTieuChiDat (số tiêu chí "Đạt" trong
-    //     checklist người đánh giá, không phải dữ liệu CBNV tự chấm thật).
+    //   Nhóm 1 (1 dòng "Tổng số suất ăn"): TỰ ĐỘNG = tổng DuLieuCom.Com_ThucTe_
+    //     {Sang,Trua,Chieu,Dem} theo đúng biên bữa ăn của từng đoạn/địa điểm đã
+    //     khai báo cho cột nhà thầu đó — xem TinhTongSuatAnTuDoanAsync.
+    //   Nhóm 2 (5 dòng "Số lượt đánh giá mức 1..5"): TỰ ĐỘNG — đếm
+    //     KetQuaDanhGia (hệ kiosk CBNV tự chấm 1-5, đọc thẳng ID_BuaAn — đã
+    //     được gán đáng tin cậy lúc kiosk ghi, xem EvaluatesController.Post)
+    //     tại các địa điểm/đoạn thời gian đã khai báo — xem
+    //     TinhSoLuotCbnvTheoMucTuDoanAsync.
     //   Nhóm 3 (1 dòng "Điểm đánh giá trung bình"): TỰ ĐỘNG =
     //     (1*sl1+2*sl2+3*sl3+4*sl4+5*sl5) / tổng lượt (nhóm 2), cùng cột nhà thầu.
     //   Nhóm 4 (1 dòng "Tỷ lệ CBNV tham gia đánh giá"): TỰ ĐỘNG = tổng nhóm 2 /
@@ -35,37 +44,15 @@ namespace DanhGiaAPI.Services
     // TieuChiBang2/KhoiTaoBang2CoDinhAsync/TinhLaiBang2Async) — 12 dòng (2
     // phòng ban P.ĐN/P.ATMT × 6 tiêu chí), P.ĐN đa số TỰ ĐỘNG từ Phiếu 2,
     // P.ATMT chỉ VSATTP TỰ ĐỘNG từ Phiếu 1, "Đa dạng thực đơn" luôn nhập tay.
+    // KHÔNG quan tâm địa điểm/bữa ăn — chỉ lọc Phiếu 2/Phiếu 1 theo NGÀY có
+    // rơi vào UNION các đoạn của cột nhà thầu đó hay không (TrongDoanNao) —
+    // công thức tính điểm giữ nguyên hoàn toàn.
     //
-    // Bảng 3-5: đổi từ master NhomTieuChi/TieuChi sang CỐ ĐỊNH hard-code
-    // (2026-09-02, xem 02. Phantich/modules/Phieu4_TongHopPhanBo.md) — master
-    // chưa từng được cấu hình cho 3 bảng này nên trước đây luôn rỗng. Nội dung
-    // lấy đúng theo mẫu giấy BM.09/HD.22.04:
-    //   Bảng 3.1 ("Cơ chế hiệu chỉnh"): TĨNH hoàn toàn, không có ở DB — render
-    //     thẳng ở FE (Phieu4FormPage.tsx), không có cột nhà thầu.
-    //   Bảng 3.2 ("Điểm tổng hợp của các Nhà thầu"): 3 dòng CỐ ĐỊNH (hệ số
-    //     hiệu chỉnh / điểm TB CBNV sau hiệu chỉnh / điểm tổng hợp theo trọng
-    //     số), NHẬP TAY hoàn toàn, dùng ĐÚNG cơ chế Phieu4_GiaTri theo cột nhà
-    //     thầu như Bảng 1/2 — xem DongBoBang3CoDinhAsync. FE hiển thị XOAY
-    //     TRỤC (nhà thầu là hàng) để khớp bản giấy, nhưng lưu trữ vẫn dòng ×
-    //     cột nhà thầu như mọi bảng khác.
-    //   Bảng 4 ("Phân bổ theo Nhà ăn/Điểm ăn"): 1 dòng / dbo.DiaDiemNhaAn đang
-    //     active, đồng bộ tự động mỗi lần đọc phiếu — xem
-    //     DongBoBang4TuDiaDiemAsync. KHÔNG có cột nhà thầu — giá trị TỰ ĐỘNG
-    //     (đổi từ nhập tay) lưu ở Phieu4_Dong.GiaTriChung (không qua
-    //     Phieu4_GiaTri) = tổng DuLieuCom.Com_ThucTe_ALL trong [TuNgay, DenNgay]
-    //     tại đúng địa điểm đó, xem TinhLaiGiaTriChungTheoDiaDiemAsync.
-    //   Bảng 5 ("Phân bổ theo Nhà thầu"): 1 dòng / cặp (NhaThau, DiaDiemNhaAn)
-    //     suy ra từ Phiếu 2 trong [TuNgay, DenNgay] của phiếu (CHỈ Phiếu 2 —
-    //     Phiếu 1 không có liên kết nào tới DiaDiemNhaAn), đồng bộ tự động —
-    //     xem DongBoBang5TuPhieu2Async + LayDiaDiemRoRangCuaNhaThauAsync. Giá
-    //     trị cũng lưu ở GiaTriChung (không chia theo cột nhà thầu, đã cố định
-    //     ở CẤP DÒNG qua Phieu4_Dong.NhaThauId), TỰ ĐỘNG cùng công thức Bảng 4
-    //     (TinhLaiGiaTriChungTheoDiaDiemAsync — 1 dòng ứng đúng 1 địa điểm nên
-    //     không cần lọc thêm theo nhà thầu).
-    // Cả 2 bảng 4/5 chỉ THÊM dòng còn thiếu mỗi lần đọc phiếu (idempotent),
-    // không bao giờ xóa dòng cũ — giữ lịch sử nếu 1 địa điểm/nhà thầu không
-    // còn "rõ ràng" ở lần tính sau. Giá trị TỰ ĐỘNG chỉ ghi đè ô chưa bị sửa
-    // tay (Phieu4_Dong.ChinhSuaThuCong = false), tính lại mỗi lần đọc phiếu.
+    // Phiếu 4.11.14: BỎ HẲN Bảng 3 ("Cơ chế hiệu chỉnh"/"Điểm tổng hợp"),
+    // Bảng 4 ("Phân bổ theo Nhà ăn"), Bảng 5 ("Phân bổ theo Nhà thầu") khỏi
+    // luồng tạo/tính lại — Phiếu 4 giờ CHỈ còn Bảng 1/2 (xác nhận nghiệp vụ).
+    // Phiếu 4 tạo TRƯỚC thời điểm đổi vẫn còn dữ liệu Bảng 3/4/5 nguyên vẹn
+    // trong DB (không xóa, không đồng bộ/tính lại nữa) — chỉ ngừng SINH MỚI.
     public class Phieu4Service : IPhieu4Service
     {
         private readonly IPhieu4TongHopRepository _phieuRepository;
@@ -73,18 +60,22 @@ namespace DanhGiaAPI.Services
         private readonly IPhieu4BangRepository     _bangRepository;
         private readonly IPhieu4DongRepository     _dongRepository;
         private readonly IPhieu4GiaTriRepository   _giaTriRepository;
+        private readonly IPhieu4DoanRepository     _doanRepository;
+        private readonly IPhieu4DoanDiaDiemRepository _doanDiaDiemRepository;
+        private readonly IBuaAnRepository          _buaAnRepository;
         private readonly IPhieu2DanhGiaRepository  _phieu2Repository;
         private readonly IPhieu2TieuChiRepository  _phieu2TieuChiRepository;
-        private readonly IPhieu2NhaAnRepository    _phieu2NhaAnRepository;
         private readonly IPhieu1KiemTraRepository  _phieu1Repository;
         private readonly IPhieu1KetLuanRepository  _phieu1KetLuanRepository;
         private readonly IKetQuaDanhGiaRepository  _ketQuaDanhGiaRepository;
         private readonly IDuLieuComRepository      _duLieuComRepository;
         private readonly INhaThauRepository        _nhaThauRepository;
         private readonly IPhongBanRepository       _phongBanRepository;
-        private readonly IDiaDiemNhaAnRepository   _diaDiemNhaAnRepository;
+        private readonly INguoiDungPhieuQuyenRepository _nguoiDungPhieuQuyenRepository;
+        private readonly IQuyenXemPhieuService     _quyenXemPhieuService;
         private readonly ISoHieuService            _soHieuService;
         private readonly IChuKyPhieuService         _chuKyPhieuService;
+        private readonly IChuKyPhieuRepository       _chuKyPhieuRepository;
         private readonly INhatKyChinhSuaService     _nhatKyChinhSuaService;
         private readonly IUnitOfWork                _unitOfWork;
 
@@ -93,6 +84,12 @@ namespace DanhGiaAPI.Services
         // 2 phòng ban (P.ĐN Stt 1-6, P.ATMT Stt 7-12 — dùng Stt liên tục toàn
         // bảng để 12 dòng không đụng nhau khi FE sort theo Stt). TC3 "Đa dạng
         // thực đơn" không có nguồn tự động ở nhánh nào -> luôn nhập tay.
+        //
+        // QUAN TRỌNG: thứ tự mảng này (theo Stt) PHẢI khớp CHÍNH XÁC với mảng
+        // TIEU_CHI_BANG2 ở DanhGiaNhaAnUI/src/config/phieu4BangConfig.ts (FE
+        // chỉ hard-code nhãn hiển thị, không đọc MaTieuChiPhieu2 ở đây) — đổi
+        // thứ tự/thêm/bớt 1 tiêu chí ở bên nào thì PHẢI sửa bên kia theo đúng
+        // cùng MaTieuChiPhieu2, nếu không nhãn cột sẽ lệch khỏi số liệu.
         private static readonly (int Stt, string Ten, string? MaTieuChiPhieu2)[] TieuChiBang2 = new[]
         {
             (1, "Tuân thủ đúng quy định về vệ sinh an toàn thực phẩm", "VSATTP"),
@@ -103,36 +100,28 @@ namespace DanhGiaAPI.Services
             (6, "Phản hồi sự cố, xử lý khiếu nại nhanh chóng", "PHAN_HOI_SU_CO"),
         };
 
-        // Bảng 3.2 — 3 dòng CỐ ĐỊNH, NHẬP TAY hoàn toàn (chưa có công thức tự
-        // động cho hệ số hiệu chỉnh/điểm sau hiệu chỉnh — xác nhận nghiệp vụ
-        // 2026-09-02). FE hiển thị xoay trục (nhà thầu là hàng, xem
-        // Phieu4FormPage.tsx) nhưng dòng/giá trị vẫn lưu dòng × cột nhà thầu
-        // như các bảng khác.
-        private static readonly (int Stt, string Ten)[] TieuChiBang3 = new[]
-        {
-            (1, "Hệ số hiệu chỉnh cho điểm đánh giá CBNV"),
-            (2, "Điểm đánh giá trung bình của CBNV sau hiệu chỉnh"),
-            (3, "Điểm tổng hợp theo trọng số đánh giá từ CBNV và P.CHN sau hiệu chỉnh"),
-        };
-
         public Phieu4Service(
             IPhieu4TongHopRepository phieuRepository,
             IPhieu4NhaThauRepository nhaThauCotRepository,
             IPhieu4BangRepository bangRepository,
             IPhieu4DongRepository dongRepository,
             IPhieu4GiaTriRepository giaTriRepository,
+            IPhieu4DoanRepository doanRepository,
+            IPhieu4DoanDiaDiemRepository doanDiaDiemRepository,
+            IBuaAnRepository buaAnRepository,
             IPhieu2DanhGiaRepository phieu2Repository,
             IPhieu2TieuChiRepository phieu2TieuChiRepository,
-            IPhieu2NhaAnRepository phieu2NhaAnRepository,
             IPhieu1KiemTraRepository phieu1Repository,
             IPhieu1KetLuanRepository phieu1KetLuanRepository,
             IKetQuaDanhGiaRepository ketQuaDanhGiaRepository,
             IDuLieuComRepository duLieuComRepository,
             INhaThauRepository nhaThauRepository,
             IPhongBanRepository phongBanRepository,
-            IDiaDiemNhaAnRepository diaDiemNhaAnRepository,
+            INguoiDungPhieuQuyenRepository nguoiDungPhieuQuyenRepository,
+            IQuyenXemPhieuService quyenXemPhieuService,
             ISoHieuService soHieuService,
             IChuKyPhieuService chuKyPhieuService,
+            IChuKyPhieuRepository chuKyPhieuRepository,
             INhatKyChinhSuaService nhatKyChinhSuaService,
             IUnitOfWork unitOfWork)
         {
@@ -141,18 +130,22 @@ namespace DanhGiaAPI.Services
             _bangRepository         = bangRepository;
             _dongRepository         = dongRepository;
             _giaTriRepository       = giaTriRepository;
+            _doanRepository         = doanRepository;
+            _doanDiaDiemRepository  = doanDiaDiemRepository;
+            _buaAnRepository        = buaAnRepository;
             _phieu2Repository       = phieu2Repository;
             _phieu2TieuChiRepository = phieu2TieuChiRepository;
-            _phieu2NhaAnRepository  = phieu2NhaAnRepository;
             _phieu1Repository       = phieu1Repository;
             _phieu1KetLuanRepository = phieu1KetLuanRepository;
             _ketQuaDanhGiaRepository = ketQuaDanhGiaRepository;
             _duLieuComRepository    = duLieuComRepository;
             _nhaThauRepository      = nhaThauRepository;
             _phongBanRepository     = phongBanRepository;
-            _diaDiemNhaAnRepository = diaDiemNhaAnRepository;
+            _nguoiDungPhieuQuyenRepository = nguoiDungPhieuQuyenRepository;
+            _quyenXemPhieuService   = quyenXemPhieuService;
             _soHieuService          = soHieuService;
             _chuKyPhieuService      = chuKyPhieuService;
+            _chuKyPhieuRepository   = chuKyPhieuRepository;
             _nhatKyChinhSuaService  = nhatKyChinhSuaService;
             _unitOfWork             = unitOfWork;
         }
@@ -161,20 +154,66 @@ namespace DanhGiaAPI.Services
         // DANH SÁCH
         // ============================================================
 
-        public async Task<List<Phieu4TongHop>> DanhSachAsync(string? trangThai)
+        // Quyền "Đánh giá / nhập liệu" — cùng pattern Phieu1Service/Phieu2Service
+        // (trước đây Phiếu 4 KHÔNG có gate nào, mọi tài khoản nội bộ đều tạo
+        // được — xem VaiTro.md mục 10).
+        private async Task KiemTraQuyenDanhGiaAsync(int? nguoiDungId, bool laAdmin)
         {
+            if (laAdmin) return;
+
+            if (!nguoiDungId.HasValue || !await _nguoiDungPhieuQuyenRepository.AnyAsync(
+                    x => x.NguoiDungId == nguoiDungId.Value && x.LoaiPhieu == "PHIEU4" && x.DuocDanhGia))
+                throw new ApiException(
+                    "Bạn không có quyền tạo Phiếu 4 — liên hệ Admin để được phân quyền \"Đánh giá / nhập liệu\" ở mục Phân quyền theo Phiếu",
+                    StatusCodes.Status403Forbidden);
+        }
+
+        // Quyền XEM (danh sách + chi tiết) của tài khoản NỘI BỘ — tài khoản
+        // nhà thầu đã bị chặn hoàn toàn ở Controller (ChanTaiKhoanNhaThau),
+        // không cần xử lý riêng ở đây.
+        private async Task KiemTraQuyenXemAsync(int nguoiDungId, bool laAdmin)
+        {
+            if (laAdmin) return;
+
+            if (!await _quyenXemPhieuService.CoQuyenXemAsync(nguoiDungId, "PHIEU4"))
+                throw new ApiException(
+                    "Bạn không có quyền truy cập Phiếu 4 — liên hệ Admin để được phân quyền ở mục Phân quyền theo Phiếu",
+                    StatusCodes.Status403Forbidden);
+        }
+
+        public async Task<PagedResultDto<Phieu4TongHop>> DanhSachAsync(
+            string? trangThai, DateTime? tuNgay, DateTime? denNgay, string? tuKhoa, bool chiCuaToi, int page, int pageSize,
+            int nguoiDungId, bool laAdmin)
+        {
+            await KiemTraQuyenXemAsync(nguoiDungId, laAdmin);
+
             var query = _phieuRepository.Query();
             if (!string.IsNullOrWhiteSpace(trangThai))
                 query = query.Where(x => x.TrangThai == trangThai);
+            if (tuNgay.HasValue) query = query.Where(x => x.TuNgay >= tuNgay.Value.Date);
+            if (denNgay.HasValue) query = query.Where(x => x.TuNgay <= denNgay.Value.Date);
+            if (!string.IsNullOrWhiteSpace(tuKhoa)) query = query.Where(x => x.SoHieu.Contains(tuKhoa));
+            if (chiCuaToi) query = query.Where(x => x.NguoiTao == nguoiDungId);
 
-            return query.OrderByDescending(x => x.TuNgay).ThenByDescending(x => x.Id).ToList();
+            var tongSo = query.Count();
+            var items = query.OrderByDescending(x => x.TuNgay).ThenByDescending(x => x.Id)
+                .Skip((page - 1) * pageSize).Take(pageSize).ToList();
+            return new PagedResultDto<Phieu4TongHop> { Items = items, TotalCount = tongSo, Page = page, PageSize = pageSize };
         }
 
         // ============================================================
         // CHI TIẾT
         // ============================================================
 
-        public async Task<Phieu4ResponseDto> ChiTietAsync(int id)
+        public async Task<Phieu4ResponseDto> ChiTietAsync(int id, int nguoiDungId, bool laAdmin)
+        {
+            await KiemTraQuyenXemAsync(nguoiDungId, laAdmin);
+            return await LayChiTietAsync(id);
+        }
+
+        // Tách khỏi ChiTietAsync để các thao tác NỘI BỘ tự build lại response
+        // DTO sau khi ghi mà không phải soi lại quyền XEM (xem Phieu1Service).
+        private async Task<Phieu4ResponseDto> LayChiTietAsync(int id)
         {
             var phieu = await _phieuRepository.GetByIdAsync(id)
                 ?? throw new ApiException("Không tìm thấy phiếu tổng hợp", StatusCodes.Status404NotFound);
@@ -185,31 +224,16 @@ namespace DanhGiaAPI.Services
             var bang = (await _bangRepository.FindAsync(x => x.PhieuId == id))
                        .OrderBy(x => x.SoBang).ToList();
 
-            // Bảng 2-5: CỐ ĐỊNH (đổi từ master NhomTieuChi/TieuChi 2026-09-02,
+            // Bảng 2: CỐ ĐỊNH (đổi từ master NhomTieuChi/TieuChi 2026-09-02,
             // xem doc comment đầu file) — đồng bộ dòng còn thiếu mỗi lần đọc
-            // phiếu, không cần thao tác "thêm dòng" thủ công.
+            // phiếu, không cần thao tác "thêm dòng" thủ công. Bảng 3/4/5
+            // KHÔNG còn đồng bộ/tính lại nữa (đã bỏ khỏi Phiếu 4 mới) — phiếu
+            // cũ tạo trước đây vẫn trả về dữ liệu Bảng 3/4/5 y nguyên (không
+            // xóa) khi GET chi tiết, chỉ không tự tính lại/thêm dòng mới nữa.
             var nhaThauIdsHienTai = nhaThau.Select(x => x.NhaThauId).ToList();
             var bang2Entity = bang.FirstOrDefault(x => x.SoBang == 2);
             if (bang2Entity != null)
                 await DongBoBang2CoDinhAsync(bang2Entity, nhaThauIdsHienTai);
-
-            var bang3Entity = bang.FirstOrDefault(x => x.SoBang == 3);
-            if (bang3Entity != null)
-                await DongBoBang3CoDinhAsync(bang3Entity, nhaThauIdsHienTai);
-
-            var bang4Entity = bang.FirstOrDefault(x => x.SoBang == 4);
-            if (bang4Entity != null)
-            {
-                await DongBoBang4TuDiaDiemAsync(bang4Entity);
-                await TinhLaiGiaTriChungTheoDiaDiemAsync(bang4Entity.Id, phieu.TuNgay, phieu.DenNgay);
-            }
-
-            var bang5Entity = bang.FirstOrDefault(x => x.SoBang == 5);
-            if (bang5Entity != null)
-            {
-                await DongBoBang5TuPhieu2Async(bang5Entity, phieu, nhaThau);
-                await TinhLaiGiaTriChungTheoDiaDiemAsync(bang5Entity.Id, phieu.TuNgay, phieu.DenNgay);
-            }
 
             var bangIds = bang.Select(x => x.Id).ToList();
 
@@ -244,25 +268,75 @@ namespace DanhGiaAPI.Services
                 }).ToList(),
             }).ToList();
 
-            return new Phieu4ResponseDto { Phieu = phieu, NhaThau = nhaThau, Bang = bangDto };
+            var nhaThauDto = await BuildNhaThauDtoAsync(nhaThau);
+
+            return new Phieu4ResponseDto { Phieu = phieu, NhaThau = nhaThauDto, Bang = bangDto };
+        }
+
+        // Gắn kèm bộ "đoạn" thời gian/địa điểm CỦA RIÊNG từng cột nhà thầu —
+        // thay cho trả thẳng entity Phieu4NhaThau thô.
+        private async Task<List<Phieu4NhaThauDto>> BuildNhaThauDtoAsync(List<Phieu4NhaThau> nhaThau)
+        {
+            var cotIds = nhaThau.Select(x => x.Id).ToList();
+            var doanEntities = cotIds.Count > 0
+                ? await _doanRepository.FindAsync(x => cotIds.Contains(x.NhaThauCotId))
+                : new List<Phieu4Doan>();
+            var doanIds = doanEntities.Select(x => x.Id).ToList();
+            var doanDiaDiem = doanIds.Count > 0
+                ? await _doanDiaDiemRepository.FindAsync(x => doanIds.Contains(x.DoanId))
+                : new List<Phieu4DoanDiaDiem>();
+            var buaAnTheoId = (await _buaAnRepository.GetAllAsync()).ToDictionary(b => b.ID, b => b.CodeBuaAn);
+
+            return nhaThau.Select(cot => new Phieu4NhaThauDto
+            {
+                Id = cot.Id,
+                PhieuId = cot.PhieuId,
+                NhaThauId = cot.NhaThauId,
+                ThuTu = cot.ThuTu,
+                Doan = doanEntities
+                    .Where(d => d.NhaThauCotId == cot.Id)
+                    .OrderBy(d => d.TuNgay).ThenBy(d => d.Id)
+                    .Select(d => new DoanDto
+                    {
+                        Id = d.Id,
+                        TuNgay = d.TuNgay,
+                        TuBuaAnId = d.TuBuaAnId,
+                        TuBuaAnCode = buaAnTheoId.TryGetValue(d.TuBuaAnId, out var tuMa) ? tuMa : null,
+                        DenNgay = d.DenNgay,
+                        DenBuaAnId = d.DenBuaAnId,
+                        DenBuaAnCode = buaAnTheoId.TryGetValue(d.DenBuaAnId, out var denMa) ? denMa : null,
+                        DiaDiemNhaAnIds = doanDiaDiem.Where(x => x.DoanId == d.Id).Select(x => x.DiaDiemNhaAnId).ToList(),
+                    }).ToList(),
+            }).ToList();
         }
 
         // ============================================================
         // TẠO MỚI
         // ============================================================
 
-        public async Task<Phieu4ResponseDto> ThemAsync(Phieu4Request request, int? nguoiTaoId)
+        public async Task<Phieu4ResponseDto> ThemAsync(Phieu4Request request, int? nguoiTaoId, bool laAdmin)
         {
-            if (request.NhaThauIds == null || request.NhaThauIds.Count == 0)
-                throw new ApiException("Vui lòng chọn ít nhất 1 nhà thầu");
-            if (request.DenNgay < request.TuNgay)
-                throw new ApiException("Ngày kết thúc phải sau ngày bắt đầu");
+            await KiemTraQuyenDanhGiaAsync(nguoiTaoId, laAdmin);
 
-            var nhaThauHopLe = await _nhaThauRepository.FindAsync(x => request.NhaThauIds.Contains(x.Id));
-            if (nhaThauHopLe.Count != request.NhaThauIds.Distinct().Count())
+            if (request.NhaThau == null || request.NhaThau.Count == 0)
+                throw new ApiException("Vui lòng chọn ít nhất 1 nhà thầu");
+
+            // Gộp theo NhaThauId (giữ đoạn của lần khai báo ĐẦU TIÊN nếu trùng)
+            // — cùng tinh thần Distinct() của luồng cũ.
+            var nhaThauRequests = request.NhaThau.GroupBy(x => x.NhaThauId).Select(g => g.First()).ToList();
+            var nhaThauIds = nhaThauRequests.Select(x => x.NhaThauId).ToList();
+
+            var nhaThauHopLe = await _nhaThauRepository.FindAsync(x => nhaThauIds.Contains(x.Id));
+            if (nhaThauHopLe.Count != nhaThauIds.Count)
                 throw new ApiException("Có nhà thầu không tồn tại trong danh sách đã chọn");
 
-            var soHieu = await SinhSoHieuAsync(request.TuNgay.Year);
+            var tuNgayPhieu = request.TuNgay.Date;
+            var denNgayPhieu = request.DenNgay.Date;
+            if (tuNgayPhieu > denNgayPhieu)
+                throw new ApiException("Từ ngày phải trước hoặc bằng Đến ngày");
+
+            // Số hiệu reset theo năm hiện tại (không theo nhà thầu, xem SinhSoHieuAsync).
+            var soHieu = await SinhSoHieuAsync(DateTime.Now.Year);
 
             await using var transaction = await _unitOfWork.BeginTransactionAsync();
             try
@@ -270,8 +344,8 @@ namespace DanhGiaAPI.Services
                 var phieu = new Phieu4TongHop
                 {
                     SoHieu    = soHieu,
-                    TuNgay    = request.TuNgay.Date,
-                    DenNgay   = request.DenNgay.Date,
+                    TuNgay    = tuNgayPhieu,
+                    DenNgay   = denNgayPhieu,
                     NguoiTao  = nguoiTaoId,
                     TrangThai = "NHAP",
                     NgayTao   = DateTime.Now,
@@ -281,12 +355,12 @@ namespace DanhGiaAPI.Services
 
                 var thuTu = 0;
                 var nhaThauCotMoi = new List<Phieu4NhaThau>();
-                foreach (var nhaThauId in request.NhaThauIds.Distinct())
+                foreach (var item in nhaThauRequests)
                 {
                     var cot = new Phieu4NhaThau
                     {
                         PhieuId = phieu.Id,
-                        NhaThauId = nhaThauId,
+                        NhaThauId = item.NhaThauId,
                         ThuTu = thuTu++,
                     };
                     await _nhaThauCotRepository.AddAsync(cot);
@@ -294,7 +368,9 @@ namespace DanhGiaAPI.Services
                 }
                 await _unitOfWork.SaveChangesAsync();
 
-                var nhaThauIds = request.NhaThauIds.Distinct().ToList();
+                foreach (var (item, cot) in nhaThauRequests.Zip(nhaThauCotMoi))
+                    await TaoDoanAsync(cot.Id, item.Doan, tuNgayPhieu, denNgayPhieu);
+
                 await KhoiTaoBang1Async(phieu.Id, nhaThauIds);
 
                 var bang2 = new Phieu4Bang { PhieuId = phieu.Id, SoBang = 2, TenBang = "2. Tổng hợp kết quả đánh giá từ phòng chức năng" };
@@ -302,26 +378,11 @@ namespace DanhGiaAPI.Services
                 await _unitOfWork.SaveChangesAsync(); // cần Id thật để seed dòng
                 await DongBoBang2CoDinhAsync(bang2, nhaThauIds);
 
-                var bang3 = new Phieu4Bang { PhieuId = phieu.Id, SoBang = 3, TenBang = "3. Điểm tổng hợp của mỗi Nhà thầu" };
-                await _bangRepository.AddAsync(bang3);
-                await _unitOfWork.SaveChangesAsync();
-                await DongBoBang3CoDinhAsync(bang3, nhaThauIds);
-
-                var bang4 = new Phieu4Bang { PhieuId = phieu.Id, SoBang = 4, TenBang = "4. Phân bổ số lượng suất ăn theo Nhà ăn/Điểm ăn phục vụ" };
-                await _bangRepository.AddAsync(bang4);
-                await _unitOfWork.SaveChangesAsync();
-                await DongBoBang4TuDiaDiemAsync(bang4);
-
-                var bang5 = new Phieu4Bang { PhieuId = phieu.Id, SoBang = 5, TenBang = "5. Phân bổ số lượng suất ăn theo Nhà thầu" };
-                await _bangRepository.AddAsync(bang5);
-                await _unitOfWork.SaveChangesAsync();
-                await DongBoBang5TuPhieu2Async(bang5, phieu, nhaThauCotMoi);
-
                 await transaction.CommitAsync();
 
                 await TinhLaiAsync(phieu.Id);
 
-                return await ChiTietAsync(phieu.Id);
+                return await LayChiTietAsync(phieu.Id);
             }
             catch
             {
@@ -334,11 +395,12 @@ namespace DanhGiaAPI.Services
         // XÓA
         // ============================================================
 
-        public async Task XoaAsync(int id)
+        // laAdmin bypass ràng buộc trạng thái — xem Phieu1Service.XoaAsync.
+        public async Task XoaAsync(int id, bool laAdmin)
         {
             var phieu = await _phieuRepository.GetByIdAsync(id)
                 ?? throw new ApiException("Không tìm thấy phiếu tổng hợp", StatusCodes.Status404NotFound);
-            if (phieu.TrangThai != "NHAP")
+            if (!laAdmin && phieu.TrangThai != "NHAP")
                 throw new ApiException("Chỉ có thể xóa phiếu ở trạng thái Nháp");
 
             var bang = await _bangRepository.FindAsync(x => x.PhieuId == id);
@@ -352,7 +414,22 @@ namespace DanhGiaAPI.Services
             _bangRepository.RemoveRange(bang);
 
             var nhaThau = await _nhaThauCotRepository.FindAsync(x => x.PhieuId == id);
+            var nhaThauCotIds = nhaThau.Select(x => x.Id).ToList();
+            if (nhaThauCotIds.Count > 0)
+            {
+                var doan = await _doanRepository.FindAsync(x => nhaThauCotIds.Contains(x.NhaThauCotId));
+                var doanIds = doan.Select(x => x.Id).ToList();
+                if (doanIds.Count > 0)
+                {
+                    var doanDiaDiem = await _doanDiaDiemRepository.FindAsync(x => doanIds.Contains(x.DoanId));
+                    _doanDiaDiemRepository.RemoveRange(doanDiaDiem);
+                }
+                _doanRepository.RemoveRange(doan);
+            }
             _nhaThauCotRepository.RemoveRange(nhaThau);
+
+            var chuKy = await _chuKyPhieuRepository.FindAsync(x => x.LoaiDoiTuong == "PHIEU4" && x.DoiTuongId == id);
+            _chuKyPhieuRepository.RemoveRange(chuKy);
 
             _phieuRepository.Remove(phieu);
             await _unitOfWork.SaveChangesAsync();
@@ -419,12 +496,23 @@ namespace DanhGiaAPI.Services
             var giaTriCuaNhaThau = await _giaTriRepository.FindAsync(x => dongIds.Contains(x.DongId) && x.NhaThauId == nhaThauId);
             _giaTriRepository.RemoveRange(giaTriCuaNhaThau);
 
-            // Bảng 5: dòng gắn CỨNG với nhà thầu này (Phieu4Dong.NhaThauId, khác
-            // nghĩa Phieu4GiaTri.NhaThauId — xem comment ở Phieu4Dong.cs) — xóa
-            // luôn để không còn nhóm "ma" của 1 nhà thầu đã bị bỏ khỏi phiếu.
+            // Bảng 5 (chỉ còn ở phiếu cũ tạo trước khi bỏ Bảng 3/4/5): dòng gắn
+            // CỨNG với nhà thầu này (Phieu4Dong.NhaThauId, khác nghĩa
+            // Phieu4GiaTri.NhaThauId — xem comment ở Phieu4Dong.cs) — xóa luôn
+            // để không còn nhóm "ma" của 1 nhà thầu đã bị bỏ khỏi phiếu.
             var dongBang5CuaNhaThau = dong.Where(x => x.NhaThauId == nhaThauId).ToList();
             if (dongBang5CuaNhaThau.Count > 0)
                 _dongRepository.RemoveRange(dongBang5CuaNhaThau);
+
+            // Đoạn thời gian/địa điểm của riêng cột này.
+            var doan = await _doanRepository.FindAsync(x => x.NhaThauCotId == cot.Id);
+            var doanIds = doan.Select(x => x.Id).ToList();
+            if (doanIds.Count > 0)
+            {
+                var doanDiaDiem = await _doanDiaDiemRepository.FindAsync(x => doanIds.Contains(x.DoanId));
+                _doanDiaDiemRepository.RemoveRange(doanDiaDiem);
+            }
+            _doanRepository.RemoveRange(doan);
 
             _nhaThauCotRepository.Remove(cot);
 
@@ -455,7 +543,7 @@ namespace DanhGiaAPI.Services
             var danhSachNhaThau = await _nhaThauCotRepository.FindAsync(x => x.PhieuId == id);
             var bang1 = (await _bangRepository.FindAsync(x => x.PhieuId == id && x.SoBang == 1))
                         .FirstOrDefault();
-            if (bang1 == null) return await ChiTietAsync(id);
+            if (bang1 == null) return await LayChiTietAsync(id);
 
             var dongBang1 = await _dongRepository.FindAsync(x => x.BangId == bang1.Id);
             var dongNhom1 = dongBang1.FirstOrDefault(x => x.NhomSo == 1);
@@ -468,8 +556,8 @@ namespace DanhGiaAPI.Services
 
             foreach (var cot in danhSachNhaThau)
             {
-                var nhaAnRoRang = await LayDiaDiemRoRangCuaNhaThauAsync(cot.NhaThauId, phieu.TuNgay, phieu.DenNgay);
-                var soLuotTheoMuc = await TinhSoLuotCbnvTheoMucAsync(nhaAnRoRang, phieu.TuNgay, phieu.DenNgay);
+                var doanCalc = await LayDoanCalcTheoCotAsync(cot.Id);
+                var soLuotTheoMuc = await TinhSoLuotCbnvTheoMucTuDoanAsync(doanCalc);
                 var tongLuot = soLuotTheoMuc[1] + soLuotTheoMuc[2] + soLuotTheoMuc[3] + soLuotTheoMuc[4] + soLuotTheoMuc[5];
 
                 // Nhóm 2: 5 dòng, mỗi dòng ứng với 1 mức điểm (Stt = mức)
@@ -480,11 +568,12 @@ namespace DanhGiaAPI.Services
                     await GhiGiaTriTuDongAsync(giaTriBang1, d.Id, cot.NhaThauId, soLuotTheoMuc[muc]);
                 }
 
-                // Nhóm 1: Tổng số suất ăn — tự động = tổng DuLieuCom.Com_ThucTe_ALL
-                // tại các Nhà ăn nhà thầu phụ trách (cùng nhaAnRoRang ở trên).
+                // Nhóm 1: Tổng số suất ăn — tự động = tổng DuLieuCom.Com_ThucTe_
+                // {Sang,Trua,Chieu,Dem} theo đúng biên bữa ăn của từng đoạn/địa
+                // điểm đã khai báo cho cột này.
                 if (dongNhom1 != null)
                 {
-                    var tongSuatAn = await TinhTongSuatAnAsync(nhaAnRoRang, phieu.TuNgay, phieu.DenNgay);
+                    var tongSuatAn = await TinhTongSuatAnTuDoanAsync(doanCalc);
                     await GhiGiaTriTuDongAsync(giaTriBang1, dongNhom1.Id, cot.NhaThauId, tongSuatAn);
                 }
 
@@ -516,7 +605,7 @@ namespace DanhGiaAPI.Services
             await TinhLaiBang2Async(phieu, danhSachNhaThau);
 
             await _unitOfWork.SaveChangesAsync();
-            return await ChiTietAsync(id);
+            return await LayChiTietAsync(id);
         }
 
         // ============================================================
@@ -545,11 +634,15 @@ namespace DanhGiaAPI.Services
 
             foreach (var cot in danhSachNhaThauCot)
             {
+                // Union ngày của TẤT CẢ đoạn của RIÊNG cột này — Bảng 2 không
+                // quan tâm địa điểm/bữa ăn bắt đầu-kết thúc của đoạn, chỉ NGÀY.
+                var doanRanges = await LayDoanRangesTheoCotAsync(cot.Id);
+
                 // ---- P.ĐN (NhomSo = 1) ----
-                var phieu2CuaNhaThau = (await _phieu2Repository.FindAsync(x => x.NhaThauId == cot.NhaThauId))
-                    .Where(x => x.ThoiGianTu.HasValue
-                             && x.ThoiGianTu.Value.Date >= phieu.TuNgay.Date
-                             && x.ThoiGianTu.Value.Date <= phieu.DenNgay.Date)
+                // Chỉ tính từ Phiếu 2 đã DUYỆT — Nháp/Chờ ký chưa phải số liệu
+                // chính thức, không được đưa vào trung bình Bảng 2.
+                var phieu2CuaNhaThau = (await _phieu2Repository.FindAsync(x => x.NhaThauId == cot.NhaThauId && x.TrangThai == "DA_DUYET"))
+                    .Where(x => x.ThoiGianTu.HasValue && TrongDoanNao(x.ThoiGianTu.Value.Date, doanRanges))
                     .ToList();
                 var phieu2Ids = phieu2CuaNhaThau.Select(x => x.Id).ToHashSet();
                 var tieuChiPhieu2 = phieu2Ids.Count > 0
@@ -562,11 +655,29 @@ namespace DanhGiaAPI.Services
                     var dong = dongBang2.FirstOrDefault(x => x.NhomSo == 1 && x.Stt == tc.Stt);
                     if (dong == null) continue;
 
-                    var cacDiem = tieuChiPhieu2
-                        .Where(x => x.MaTieuChi == tc.MaTieuChiPhieu2 && x.Diem.HasValue)
-                        .Select(x => x.Diem!.Value)
-                        .ToList();
-                    decimal? giaTri = cacDiem.Count > 0 ? Math.Round(cacDiem.Average(), 2) : null;
+                    decimal? giaTri;
+                    if (tc.MaTieuChiPhieu2 == "VSATTP")
+                    {
+                        // VSATTP: Phieu2_TieuChi.Diem đã có sẵn điểm số thật (lấy từ
+                        // Phiếu 1 liên kết hoặc nhập tay khi Đạt) -> TB trực tiếp.
+                        var cacDiem = tieuChiPhieu2
+                            .Where(x => x.MaTieuChi == tc.MaTieuChiPhieu2 && x.Diem.HasValue)
+                            .Select(x => x.Diem!.Value)
+                            .ToList();
+                        giaTri = cacDiem.Count > 0 ? Math.Round(cacDiem.Average(), 2) : null;
+                    }
+                    else
+                    {
+                        // Các tiêu chí còn lại chỉ có Đạt/Không đạt ở Phiếu 2, KHÔNG có
+                        // điểm số -> quy đổi = số Phiếu 2 Đạt tiêu chí này / số Phiếu 2
+                        // CÓ ĐÁNH GIÁ tiêu chí này (Dat hoặc KhongDat) × 5 — xác nhận
+                        // nghiệp vụ 2026-09-14, sửa lại: Phiếu 2 bỏ trống (chưa đánh
+                        // giá) tiêu chí này không còn bị tính ngầm là "không đạt" nữa,
+                        // loại hẳn khỏi cả tử số lẫn mẫu số (giống Phieu3Service.TinhLaiBang2Async).
+                        var soPhieuDanhGia = tieuChiPhieu2.Count(x => x.MaTieuChi == tc.MaTieuChiPhieu2 && (x.Dat || x.KhongDat));
+                        var soLuongDat = tieuChiPhieu2.Count(x => x.MaTieuChi == tc.MaTieuChiPhieu2 && x.Dat);
+                        giaTri = soPhieuDanhGia > 0 ? Math.Round((decimal)soLuongDat / soPhieuDanhGia * 5, 2) : null;
+                    }
                     await GhiGiaTriTuDongAsync(giaTriBang2, dong.Id, cot.NhaThauId, giaTri);
                 }
 
@@ -576,9 +687,11 @@ namespace DanhGiaAPI.Services
                     var dongVsattpAtmt = dongBang2.FirstOrDefault(x => x.NhomSo == 2 && x.Stt == 7);
                     if (dongVsattpAtmt != null)
                     {
-                        var phieu1CuaKhoangNgay = await _phieu1Repository.FindAsync(x =>
-                            x.NhaThauId == cot.NhaThauId && x.PhongBanId == pbAtmt.Id &&
-                            x.NgayKiemTra >= phieu.TuNgay.Date && x.NgayKiemTra <= phieu.DenNgay.Date);
+                        // Chỉ tính từ Phiếu 1 đã DUYỆT — cùng quy tắc với Phiếu 2 ở trên.
+                        var phieu1CuaKhoangNgay = (await _phieu1Repository.FindAsync(x =>
+                                x.NhaThauId == cot.NhaThauId && x.PhongBanId == pbAtmt.Id && x.TrangThai == "DA_DUYET"))
+                            .Where(x => TrongDoanNao(x.NgayKiemTra.Date, doanRanges))
+                            .ToList();
                         var phieu1Ids = phieu1CuaKhoangNgay.Select(x => x.Id).ToHashSet();
                         var ketLuanCuaKhoangNgay = phieu1Ids.Count > 0
                             ? await _phieu1KetLuanRepository.FindAsync(x => phieu1Ids.Contains(x.PhieuId))
@@ -603,138 +716,253 @@ namespace DanhGiaAPI.Services
         }
 
         // ============================================================
+        // ĐOẠN THỜI GIAN — helper dùng chung cho Bảng 1 (thay thế hoàn toàn
+        // suy luận "địa điểm rõ ràng" cũ)
+        // ============================================================
+
+        // Model tính toán nội bộ (không lưu DB) dựng từ Phieu4Doan +
+        // Phieu4DoanDiaDiem — TuThuTu/DenThuTu là thứ tự bữa ăn 1..4 (Sáng..Đêm).
+        private record DoanCalc(DateTime TuNgay, int TuThuTu, DateTime DenNgay, int DenThuTu, HashSet<int> DiaDiemIds);
+
+        // Bỏ dòng "ALL" (tổng cộng, dùng cho DuLieuCom.Com_ThucTe_ALL — không
+        // phải bữa ăn thật, CodeBuaAn không parse ra số được) — chỉ giữ 4 bữa
+        // Sáng/Trưa/Chiều/Đêm (CodeBuaAn "01".."04").
+        private async Task<Dictionary<int, int>> LayBuaAnThuTuAsync()
+        {
+            var buaAn = await _buaAnRepository.GetAllAsync();
+            return buaAn
+                .Where(b => int.TryParse(b.CodeBuaAn, out _))
+                .ToDictionary(b => b.ID, b => int.Parse(b.CodeBuaAn));
+        }
+
+        private async Task<List<DoanCalc>> LayDoanCalcTheoCotAsync(int nhaThauCotId)
+        {
+            var doanEntities = await _doanRepository.FindAsync(x => x.NhaThauCotId == nhaThauCotId);
+            if (doanEntities.Count == 0) return new List<DoanCalc>();
+
+            var doanIds = doanEntities.Select(x => x.Id).ToList();
+            var diaDiem = await _doanDiaDiemRepository.FindAsync(x => doanIds.Contains(x.DoanId));
+            var buaAnThuTu = await LayBuaAnThuTuAsync();
+
+            return doanEntities.Select(d => new DoanCalc(
+                d.TuNgay.Date,
+                buaAnThuTu.TryGetValue(d.TuBuaAnId, out var tu) ? tu : 1,
+                d.DenNgay.Date,
+                buaAnThuTu.TryGetValue(d.DenBuaAnId, out var den) ? den : 4,
+                diaDiem.Where(x => x.DoanId == d.Id).Select(x => x.DiaDiemNhaAnId).ToHashSet()
+            )).ToList();
+        }
+
+        private async Task<List<(DateTime TuNgay, DateTime DenNgay)>> LayDoanRangesTheoCotAsync(int nhaThauCotId)
+        {
+            var doan = await _doanRepository.FindAsync(x => x.NhaThauCotId == nhaThauCotId);
+            return doan.Select(d => (d.TuNgay.Date, d.DenNgay.Date)).ToList();
+        }
+
+        // Bảng 2 chỉ quan tâm NGÀY (không quan tâm bữa ăn bắt đầu/kết thúc của
+        // đoạn) — xác nhận nghiệp vụ.
+        private static bool TrongDoanNao(DateTime ngay, List<(DateTime TuNgay, DateTime DenNgay)> doanRanges) =>
+            doanRanges.Any(r => ngay >= r.TuNgay && ngay <= r.DenNgay);
+
+        // Biên bữa ăn (thứ tự 1..4) được tính cho 1 ngày cụ thể trong 1 đoạn —
+        // CẢ 2 đầu đoạn đều BAO GỒM bữa được chọn (xác nhận nghiệp vụ); ngày
+        // giữa đoạn tính đủ 4 bữa.
+        private static (int Min, int Max) BienBuaAnTrongNgay(DateTime ngay, DoanCalc doan)
+        {
+            var laNgayDau = ngay == doan.TuNgay;
+            var laNgayCuoi = ngay == doan.DenNgay;
+            if (laNgayDau && laNgayCuoi) return (doan.TuThuTu, doan.DenThuTu);
+            if (laNgayDau) return (doan.TuThuTu, 4);
+            if (laNgayCuoi) return (1, doan.DenThuTu);
+            return (1, 4);
+        }
+
+        // tuNgayPhieu/denNgayPhieu: khoảng ngày lập phiếu CỐ ĐỊNH (chọn lúc
+        // tạo, xem ThemAsync) — mọi đoạn (kể cả thêm sau ở trang chi tiết,
+        // xem ThemDoanAsync) đều phải nằm TRỌN trong khoảng này, khớp đúng
+        // ràng buộc DatePicker ở FE (DoanBuilder.tsx ngayToiThieu/ngayToiDa).
+        private static void KiemTraDoanHopLe(DoanRequest req, Dictionary<int, int> buaAnThuTu, DateTime tuNgayPhieu, DateTime denNgayPhieu)
+        {
+            if (!buaAnThuTu.ContainsKey(req.TuBuaAnId))
+                throw new ApiException("Bữa ăn bắt đầu không hợp lệ");
+            if (!buaAnThuTu.ContainsKey(req.DenBuaAnId))
+                throw new ApiException("Bữa ăn kết thúc không hợp lệ");
+
+            var tuNgay = req.TuNgay.Date;
+            var denNgay = req.DenNgay.Date;
+            var hopLe = tuNgay < denNgay || (tuNgay == denNgay && buaAnThuTu[req.TuBuaAnId] <= buaAnThuTu[req.DenBuaAnId]);
+            if (!hopLe)
+                throw new ApiException("Đoạn kết thúc phải sau đoạn bắt đầu");
+
+            if (tuNgay < tuNgayPhieu || denNgay > denNgayPhieu)
+                throw new ApiException(
+                    $"Đoạn phải nằm trong khoảng ngày lập phiếu ({tuNgayPhieu:dd/MM/yyyy} - {denNgayPhieu:dd/MM/yyyy})");
+        }
+
+        // Tạo các đoạn khai báo cho 1 cột nhà thầu — dùng trong ThemAsync, bên
+        // trong transaction (mỗi đoạn cần Id thật trước khi thêm địa điểm con).
+        private async Task TaoDoanAsync(int nhaThauCotId, List<DoanRequest> danhSachDoan, DateTime tuNgayPhieu, DateTime denNgayPhieu)
+        {
+            if (danhSachDoan.Count == 0) return;
+            var buaAnThuTu = await LayBuaAnThuTuAsync();
+
+            foreach (var req in danhSachDoan)
+            {
+                KiemTraDoanHopLe(req, buaAnThuTu, tuNgayPhieu, denNgayPhieu);
+                var doan = new Phieu4Doan
+                {
+                    NhaThauCotId = nhaThauCotId,
+                    TuNgay = req.TuNgay.Date,
+                    TuBuaAnId = req.TuBuaAnId,
+                    DenNgay = req.DenNgay.Date,
+                    DenBuaAnId = req.DenBuaAnId,
+                };
+                await _doanRepository.AddAsync(doan);
+                await _unitOfWork.SaveChangesAsync();
+                foreach (var diaDiemId in req.DiaDiemNhaAnIds.Distinct())
+                    await _doanDiaDiemRepository.AddAsync(new Phieu4DoanDiaDiem { DoanId = doan.Id, DiaDiemNhaAnId = diaDiemId });
+            }
+        }
+
+        // ============================================================
+        // THÊM / XÓA ĐOẠN THỜI GIAN (chỉ khi NHAP/TU_CHOI) — theo TỪNG CỘT
+        // nhà thầu, thao tác xong tính lại Bảng 1 ngay.
+        // ============================================================
+
+        public async Task<Phieu4ResponseDto> ThemDoanAsync(int id, int nhaThauId, DoanRequest request)
+        {
+            var phieu = await _phieuRepository.GetByIdAsync(id)
+                ?? throw new ApiException("Không tìm thấy phiếu tổng hợp", StatusCodes.Status404NotFound);
+            if (phieu.TrangThai != "NHAP" && phieu.TrangThai != "TU_CHOI")
+                throw new ApiException("Chỉ có thể sửa đoạn khi phiếu ở trạng thái Nháp hoặc Từ chối");
+
+            var cot = await _nhaThauCotRepository.FirstOrDefaultAsync(x => x.PhieuId == id && x.NhaThauId == nhaThauId)
+                ?? throw new ApiException("Nhà thầu này không có trong phiếu");
+
+            var buaAnThuTu = await LayBuaAnThuTuAsync();
+            KiemTraDoanHopLe(request, buaAnThuTu, phieu.TuNgay, phieu.DenNgay);
+
+            var doan = new Phieu4Doan
+            {
+                NhaThauCotId = cot.Id,
+                TuNgay = request.TuNgay.Date,
+                TuBuaAnId = request.TuBuaAnId,
+                DenNgay = request.DenNgay.Date,
+                DenBuaAnId = request.DenBuaAnId,
+            };
+            await _doanRepository.AddAsync(doan);
+            await _unitOfWork.SaveChangesAsync();
+            foreach (var diaDiemId in request.DiaDiemNhaAnIds.Distinct())
+                await _doanDiaDiemRepository.AddAsync(new Phieu4DoanDiaDiem { DoanId = doan.Id, DiaDiemNhaAnId = diaDiemId });
+            await _unitOfWork.SaveChangesAsync();
+
+            return await TinhLaiAsync(id);
+        }
+
+        public async Task<Phieu4ResponseDto> XoaDoanAsync(int id, int nhaThauId, int doanId)
+        {
+            var phieu = await _phieuRepository.GetByIdAsync(id)
+                ?? throw new ApiException("Không tìm thấy phiếu tổng hợp", StatusCodes.Status404NotFound);
+            if (phieu.TrangThai != "NHAP" && phieu.TrangThai != "TU_CHOI")
+                throw new ApiException("Chỉ có thể sửa đoạn khi phiếu ở trạng thái Nháp hoặc Từ chối");
+
+            var cot = await _nhaThauCotRepository.FirstOrDefaultAsync(x => x.PhieuId == id && x.NhaThauId == nhaThauId)
+                ?? throw new ApiException("Nhà thầu này không có trong phiếu");
+
+            var doan = await _doanRepository.GetByIdAsync(doanId);
+            if (doan == null || doan.NhaThauCotId != cot.Id)
+                throw new ApiException("Không tìm thấy đoạn", StatusCodes.Status404NotFound);
+
+            var diaDiem = await _doanDiaDiemRepository.FindAsync(x => x.DoanId == doanId);
+            _doanDiaDiemRepository.RemoveRange(diaDiem);
+            _doanRepository.Remove(doan);
+            await _unitOfWork.SaveChangesAsync();
+
+            return await TinhLaiAsync(id);
+        }
+
+        // ============================================================
         // TÍNH SỐ LƯỢT ĐÁNH GIÁ CBNV (MỨC 1-5) TỪ KETQUADANHGIA (HỆ KIOSK CŨ)
         // ============================================================
         //
-        // Suy ra nhà thầu phụ trách 1 Nhà ăn (DiaDiemNhaAn) theo khoảng ngày
-        // qua Phieu2_NhaAn (tham chiếu logic tới DiaDiemNhaAn.ID —
-        // xác nhận nghiệp vụ 2026-08-27, xem
-        // modules/Phieu2_DanhGiaSuatAn.md). Thay cho proxy cũ (đếm
-        // Phieu2_KetQua.SoTieuChiDat — số tiêu chí "Đạt" trong checklist
-        // người đánh giá, không phải dữ liệu CBNV tự chấm) — xác nhận nghiệp
-        // vụ 2026-08-28, cùng công thức với Phieu3Service.
-        //
-        // Quy tắc quy Nhà ăn về nhà thầu: Nhà ăn nào có Phiếu 2 của NHIỀU nhà
-        // thầu khác nhau trong cùng khoảng ngày thì bị LOẠI khỏi tính tự
-        // động cho TẤT CẢ nhà thầu (không đủ căn cứ quy về 1 bên). Nhà ăn
-        // không có Phiếu 2 nào trong khoảng ngày cũng không tính được.
-        //
-        // Tách phần suy luận "nhà ăn rõ ràng" ra helper riêng
-        // (LayDiaDiemRoRangCuaNhaThauAsync) để dùng lại cho Bảng 5
-        // (DongBoBang5TuPhieu2Async) — xem 02. Phantich/modules/Phieu4_TongHopPhanBo.md.
-        private async Task<decimal[]> TinhSoLuotCbnvTheoMucAsync(HashSet<int> nhaAnRoRang, DateTime tuNgay, DateTime denNgay)
+        // ID_BuaAn đã được gán đáng tin cậy ngay lúc kiosk ghi bản ghi (xem
+        // EvaluatesController.Post — tra KhungGioDanhGia theo giờ hiện tại;
+        // nếu giờ nộp nằm ngoài cả 4 khung giờ thì bản ghi KHÔNG được lưu vào
+        // DB) — nên đọc thẳng ID_BuaAn, KHÔNG cần re-derive qua KhungGioDanhGia
+        // ở đây. Cộng theo đúng biên bữa ăn của từng đoạn/địa điểm đã khai báo
+        // cho cột nhà thầu này (thay thế hoàn toàn suy luận "địa điểm rõ ràng" cũ).
+        private async Task<decimal[]> TinhSoLuotCbnvTheoMucTuDoanAsync(List<DoanCalc> doanList)
         {
             var soLuot = new decimal[6]; // [0] không dùng, [1..5]
-            if (nhaAnRoRang.Count == 0) return soLuot;
+            if (doanList.Count == 0) return soLuot;
+            var diaDiemIds = doanList.SelectMany(d => d.DiaDiemIds).Distinct().ToList();
+            if (diaDiemIds.Count == 0) return soLuot;
 
-            var ketQuaCbnv = await _ketQuaDanhGiaRepository.FindAsync(x =>
-                nhaAnRoRang.Contains(x.DiaDiem_ID) &&
-                x.ThoiGianDanhGia.Date >= tuNgay.Date &&
-                x.ThoiGianDanhGia.Date <= denNgay.Date);
+            var tuNgayNhoNhat = doanList.Min(d => d.TuNgay);
+            var denNgayLonNhat = doanList.Max(d => d.DenNgay);
+            var ketQua = await _ketQuaDanhGiaRepository.FindAsync(x =>
+                diaDiemIds.Contains(x.DiaDiem_ID) &&
+                x.ThoiGianDanhGia.Date >= tuNgayNhoNhat && x.ThoiGianDanhGia.Date <= denNgayLonNhat);
+            var buaAnThuTu = await LayBuaAnThuTuAsync();
 
-            foreach (var kq in ketQuaCbnv)
+            foreach (var doan in doanList)
             {
-                if (kq.DiemDanhGia is >= 1 and <= 5) soLuot[kq.DiemDanhGia]++;
+                if (doan.DiaDiemIds.Count == 0) continue;
+                var rowsCuaDoan = ketQua.Where(r =>
+                    doan.DiaDiemIds.Contains(r.DiaDiem_ID) && r.ThoiGianDanhGia.Date >= doan.TuNgay && r.ThoiGianDanhGia.Date <= doan.DenNgay);
+                foreach (var row in rowsCuaDoan)
+                {
+                    if (row.DiemDanhGia is < 1 or > 5) continue;
+                    if (!row.ID_BuaAn.HasValue || !buaAnThuTu.TryGetValue(row.ID_BuaAn.Value, out var thuTu)) continue; // phòng thủ, không nên xảy ra
+                    var (min, max) = BienBuaAnTrongNgay(row.ThoiGianDanhGia.Date, doan);
+                    if (thuTu >= min && thuTu <= max) soLuot[row.DiemDanhGia]++;
+                }
             }
             return soLuot;
         }
 
-        // Tổng DuLieuCom.Com_ThucTe_ALL trong [TuNgay, DenNgay], tại các Nhà ăn
-        // "rõ ràng" (ID_DiemAn = DiaDiemNhaAn.ID) mà nhà thầu phụ trách — cùng
-        // tập nhaAnRoRang dùng cho TinhSoLuotCbnvTheoMucAsync.
-        private async Task<int> TinhTongSuatAnAsync(HashSet<int> nhaAnRoRang, DateTime tuNgay, DateTime denNgay)
-        {
-            if (nhaAnRoRang.Count == 0) return 0;
-
-            var duLieuCom = await _duLieuComRepository.FindAsync(x =>
-                nhaAnRoRang.Contains(x.ID_DiemAn) &&
-                x.Ngay >= tuNgay.Date && x.Ngay <= denNgay.Date);
-
-            return duLieuCom.Sum(x => x.Com_ThucTe_ALL ?? 0);
-        }
-
         // ============================================================
-        // TÍNH LẠI BẢNG 4/5 TỰ ĐỘNG TỪ DULIEUCOM (theo Nhà ăn/Điểm ăn)
+        // TÍNH TỔNG SUẤT ĂN TỪ DULIEUCOM (HỆ ĐĂNG KÝ CƠM CŨ)
         // ============================================================
         //
-        // GiaTriChung tại mỗi dòng (ứng với 1 DiaDiemNhaAnId) = tổng
-        // DuLieuCom.Com_ThucTe_ALL trong [TuNgay, DenNgay] của phiếu, tại đúng
-        // ID_DiemAn = DiaDiemNhaAnId — dùng chung cho cả Bảng 4 (không phân
-        // biệt nhà thầu) lẫn Bảng 5 (1 dòng đã ứng với đúng 1 cặp nhà
-        // thầu/địa điểm "rõ ràng" — xem DongBoBang5TuPhieu2Async — nên công
-        // thức theo địa điểm là như nhau, không cần lọc thêm theo nhà thầu).
-        // Chỉ ghi đè ô chưa bị sửa tay (ChinhSuaThuCong = false), gọi mỗi lần
-        // đọc phiếu (ChiTietAsync) ngay sau khi đồng bộ dòng còn thiếu.
-        private async Task TinhLaiGiaTriChungTheoDiaDiemAsync(int bangId, DateTime tuNgay, DateTime denNgay)
+        // Mapping CodeBuaAn -> field DuLieuCom PHẢI theo TÊN (không theo thứ
+        // tự khai báo field trong class — field là ALL,Sang,Trua,Dem,Chieu,
+        // Đêm khai TRƯỚC Chiều, khác thứ tự thời gian thật 03=Chiều,04=Đêm) —
+        // khớp đúng cách RiceDataController gán dữ liệu gốc từ hệ ngoài.
+        private static int? ComTheoMa(DuLieuCom d, int thuTu) => thuTu switch
         {
-            var dongCanTinh = (await _dongRepository.FindAsync(x => x.BangId == bangId && x.DiaDiemNhaAnId.HasValue))
-                .Where(x => !x.ChinhSuaThuCong)
-                .ToList();
-            if (dongCanTinh.Count == 0) return;
+            1 => d.Com_ThucTe_Sang,
+            2 => d.Com_ThucTe_Trua,
+            3 => d.Com_ThucTe_Chieu,
+            4 => d.Com_ThucTe_Dem,
+            _ => null,
+        };
 
-            var diaDiemIds = dongCanTinh.Select(x => x.DiaDiemNhaAnId!.Value).Distinct().ToHashSet();
+        private async Task<int> TinhTongSuatAnTuDoanAsync(List<DoanCalc> doanList)
+        {
+            if (doanList.Count == 0) return 0;
+            var diaDiemIds = doanList.SelectMany(d => d.DiaDiemIds).Distinct().ToList();
+            if (diaDiemIds.Count == 0) return 0;
+
+            var tuNgayNhoNhat = doanList.Min(d => d.TuNgay);
+            var denNgayLonNhat = doanList.Max(d => d.DenNgay);
             var duLieuCom = await _duLieuComRepository.FindAsync(x =>
-                diaDiemIds.Contains(x.ID_DiemAn) &&
-                x.Ngay >= tuNgay.Date && x.Ngay <= denNgay.Date);
+                diaDiemIds.Contains(x.ID_DiemAn) && x.Ngay.Date >= tuNgayNhoNhat && x.Ngay.Date <= denNgayLonNhat);
 
-            var tongTheoDiaDiem = duLieuCom
-                .GroupBy(x => x.ID_DiemAn)
-                .ToDictionary(g => g.Key, g => g.Sum(x => x.Com_ThucTe_ALL ?? 0));
-
-            var coThayDoi = false;
-            foreach (var dong in dongCanTinh)
+            var tong = 0;
+            foreach (var doan in doanList)
             {
-                var tong = tongTheoDiaDiem.TryGetValue(dong.DiaDiemNhaAnId!.Value, out var t) ? t : 0;
-                if (dong.GiaTriChung == tong) continue;
-                dong.GiaTriChung = tong;
-                _dongRepository.Update(dong);
-                coThayDoi = true;
+                if (doan.DiaDiemIds.Count == 0) continue;
+                var rowsCuaDoan = duLieuCom.Where(r =>
+                    doan.DiaDiemIds.Contains(r.ID_DiemAn) && r.Ngay.Date >= doan.TuNgay && r.Ngay.Date <= doan.DenNgay);
+                foreach (var row in rowsCuaDoan)
+                {
+                    var (min, max) = BienBuaAnTrongNgay(row.Ngay.Date, doan);
+                    for (var thuTu = min; thuTu <= max; thuTu++)
+                        tong += ComTheoMa(row, thuTu) ?? 0;
+                }
             }
-            if (coThayDoi) await _unitOfWork.SaveChangesAsync();
-        }
-
-        // Suy ra tập DiaDiemNhaAnId "rõ ràng" (không dùng chung bởi nhiều nhà
-        // thầu khác nhau) mà 1 nhà thầu phụ trách trong khoảng ngày, qua
-        // Phieu2_NhaAn — xem quy tắc loại trừ ở comment trên.
-        private async Task<HashSet<int>> LayDiaDiemRoRangCuaNhaThauAsync(int nhaThauId, DateTime tuNgay, DateTime denNgay)
-        {
-            var phieu2CuaNhaThau = (await _phieu2Repository.FindAsync(x => x.NhaThauId == nhaThauId))
-                .Where(x => x.ThoiGianTu.HasValue
-                         && x.ThoiGianTu.Value.Date >= tuNgay.Date
-                         && x.ThoiGianTu.Value.Date <= denNgay.Date)
-                .ToList();
-
-            // 1 Phiếu 2 có thể gộp NHIỀU nhà ăn (Phieu2_NhaAn) — suy ra tập
-            // Nhà ăn của nhà thầu qua tất cả nhà ăn nằm trong các Phiếu 2 của
-            // họ trong khoảng ngày.
-            var phieu2CuaNhaThauIds = phieu2CuaNhaThau.Select(x => x.Id).ToList();
-            var lienKetCuaNhaThau = phieu2CuaNhaThauIds.Count > 0
-                ? await _phieu2NhaAnRepository.FindAsync(x => phieu2CuaNhaThauIds.Contains(x.PhieuId))
-                : new List<Phieu2NhaAn>();
-            var nhaAnCuaNhaThau = lienKetCuaNhaThau.Select(x => x.NhaAnId).Distinct().ToList();
-            if (nhaAnCuaNhaThau.Count == 0) return new HashSet<int>();
-
-            // Tất cả Phiếu 2 (MỌI nhà thầu) trong khoảng ngày, để xét "nhà ăn rõ ràng"
-            var phieu2TrongKhoang = (await _phieu2Repository.FindAsync(x =>
-                    x.ThoiGianTu.HasValue &&
-                    x.ThoiGianTu.Value.Date >= tuNgay.Date &&
-                    x.ThoiGianTu.Value.Date <= denNgay.Date))
-                .ToList();
-            var phieu2TrongKhoangIds = phieu2TrongKhoang.Select(x => x.Id).ToList();
-            var nhaThauCuaPhieu = phieu2TrongKhoang.ToDictionary(x => x.Id, x => x.NhaThauId);
-
-            var lienKetTrongKhoang = phieu2TrongKhoangIds.Count > 0
-                ? await _phieu2NhaAnRepository.FindAsync(x =>
-                    phieu2TrongKhoangIds.Contains(x.PhieuId) && nhaAnCuaNhaThau.Contains(x.NhaAnId))
-                : new List<Phieu2NhaAn>();
-
-            return nhaAnCuaNhaThau
-                .Where(nhaAnId => lienKetTrongKhoang
-                    .Where(l => l.NhaAnId == nhaAnId)
-                    .Select(l => nhaThauCuaPhieu[l.PhieuId])
-                    .Distinct()
-                    .Count() == 1)
-                .ToHashSet();
+            return tong;
         }
 
         // ============================================================
@@ -794,7 +1022,7 @@ namespace DanhGiaAPI.Services
             }
 
             await _unitOfWork.SaveChangesAsync();
-            return await ChiTietAsync(id);
+            return await LayChiTietAsync(id);
         }
 
         // ============================================================
@@ -813,7 +1041,7 @@ namespace DanhGiaAPI.Services
             _bangRepository.Update(bang);
             await _unitOfWork.SaveChangesAsync();
 
-            return await ChiTietAsync(id);
+            return await LayChiTietAsync(id);
         }
 
         // ============================================================
@@ -914,10 +1142,10 @@ namespace DanhGiaAPI.Services
         // tục toàn bảng (không lặp lại giữa 2 nhóm) để FE (sort theo Stt khi
         // dòng rơi vào "dongKhongNhom") không bị xáo trộn.
         // Đồng bộ idempotent: chỉ thêm dòng (NhomSo,Stt) CHƯA có, an toàn gọi
-        // lại nhiều lần (lúc tạo phiếu mới lẫn mỗi lần ChiTietAsync) — cùng
-        // kiểu với DongBoBang3CoDinhAsync (Bảng 3). Giúp phiếu tạo TRƯỚC đợt
-        // đổi Bảng 2 sang cố định (2026-09-01, khi Bảng 2 còn theo master
-        // TieuChi cũ) tự có đủ dòng khi mở lại, không cần thao tác thủ công.
+        // lại nhiều lần (lúc tạo phiếu mới lẫn mỗi lần ChiTietAsync). Giúp
+        // phiếu tạo TRƯỚC đợt đổi Bảng 2 sang cố định (2026-09-01, khi Bảng 2
+        // còn theo master TieuChi cũ) tự có đủ dòng khi mở lại, không cần
+        // thao tác thủ công.
         // NoiDung KHÔNG còn tiền tố "P.ĐN -"/"P.ATMT -" — FE render Bảng 2
         // thành khối riêng với header nhóm la mã I/II đúng tên phòng ban
         // (giống Bảng 1), xem Phieu4FormPage.tsx (NHAN_NHOM_BANG2).
@@ -977,141 +1205,6 @@ namespace DanhGiaAPI.Services
                 await _giaTriRepository.AddRangeAsync(giaTriMoi);
                 await _unitOfWork.SaveChangesAsync();
             }
-        }
-
-        // Bảng 3.2 — CỐ ĐỊNH (xem TieuChiBang3): 3 dòng (NhomSo=1, Stt 1-3),
-        // NHẬP TAY hoàn toàn. Đồng bộ idempotent, cùng style
-        // DongBoBang2CoDinhAsync — an toàn gọi lại nhiều lần (tạo phiếu mới
-        // lẫn mỗi lần ChiTietAsync).
-        private async Task DongBoBang3CoDinhAsync(Phieu4Bang bang3, List<int> nhaThauIds)
-        {
-            var dongHienTai = await _dongRepository.FindAsync(x => x.BangId == bang3.Id);
-
-            var dongMoi = new List<Phieu4Dong>();
-            foreach (var tc in TieuChiBang3)
-            {
-                if (!dongHienTai.Any(x => x.NhomSo == 1 && x.Stt == tc.Stt))
-                    dongMoi.Add(new Phieu4Dong { BangId = bang3.Id, NhomSo = 1, Stt = tc.Stt, NoiDung = tc.Ten, Dvt = "Điểm (1-5)", LoaiDong = "NHAP_TAY" });
-            }
-
-            if (dongMoi.Count > 0)
-            {
-                await _dongRepository.AddRangeAsync(dongMoi);
-                await _unitOfWork.SaveChangesAsync(); // cần Id thật cho giá trị con
-            }
-
-            // Bù ô giá trị còn thiếu cho từng cột nhà thầu hiện tại — cùng
-            // đoạn logic với DongBoBang2CoDinhAsync.
-            var tatCaDong = dongMoi.Count > 0 ? dongHienTai.Concat(dongMoi).ToList() : dongHienTai;
-            var dongIds = tatCaDong.Select(x => x.Id).ToList();
-            var giaTriHienTai = dongIds.Count > 0
-                ? await _giaTriRepository.FindAsync(x => dongIds.Contains(x.DongId))
-                : new List<Phieu4GiaTri>();
-
-            var giaTriMoi = new List<Phieu4GiaTri>();
-            foreach (var dong in tatCaDong)
-                foreach (var nhaThauId in nhaThauIds)
-                    if (!giaTriHienTai.Any(g => g.DongId == dong.Id && g.NhaThauId == nhaThauId))
-                        giaTriMoi.Add(new Phieu4GiaTri { DongId = dong.Id, NhaThauId = nhaThauId });
-
-            if (giaTriMoi.Count > 0)
-            {
-                await _giaTriRepository.AddRangeAsync(giaTriMoi);
-                await _unitOfWork.SaveChangesAsync();
-            }
-        }
-
-        // Bảng 4 — đồng bộ 1 dòng / dbo.DiaDiemNhaAn đang active. Idempotent:
-        // chỉ thêm dòng cho DiaDiemNhaAnId CHƯA có trong bảng, không tạo
-        // trùng, không tự xóa nếu 1 địa điểm bị tắt active sau đó (giữ lịch
-        // sử). Giá trị (Số lượng suất ăn phục vụ/ngày) lưu ở GiaTriChung —
-        // bảng này KHÔNG có cột nhà thầu nên không đi qua Phieu4_GiaTri.
-        private async Task DongBoBang4TuDiaDiemAsync(Phieu4Bang bang4)
-        {
-            var diaDiemDangHoatDong = (await _diaDiemNhaAnRepository.FindAsync(x => x.IsActive))
-                .OrderBy(x => x.DiaDiem)
-                .ToList();
-            if (diaDiemDangHoatDong.Count == 0) return;
-
-            var dongHienTai = await _dongRepository.FindAsync(x => x.BangId == bang4.Id);
-            var diaDiemIdDaCo = dongHienTai
-                .Where(x => x.DiaDiemNhaAnId.HasValue)
-                .Select(x => x.DiaDiemNhaAnId!.Value)
-                .ToHashSet();
-            var stt = dongHienTai.Count == 0 ? 0 : dongHienTai.Max(x => x.Stt ?? 0);
-
-            var dongMoi = new List<Phieu4Dong>();
-            foreach (var diaDiem in diaDiemDangHoatDong)
-            {
-                if (diaDiemIdDaCo.Contains(diaDiem.ID)) continue; // đã đồng bộ rồi — không tạo trùng
-
-                dongMoi.Add(new Phieu4Dong
-                {
-                    BangId = bang4.Id,
-                    Stt = ++stt,
-                    NoiDung = diaDiem.DiaDiem,
-                    Dvt = "Suất",
-                    LoaiDong = "NHAP_TAY",
-                    DiaDiemNhaAnId = diaDiem.ID,
-                });
-            }
-            if (dongMoi.Count == 0) return;
-
-            await _dongRepository.AddRangeAsync(dongMoi);
-            await _unitOfWork.SaveChangesAsync();
-        }
-
-        // Bảng 5 — đồng bộ 1 dòng / cặp (NhaThau, DiaDiemNhaAn) suy ra từ
-        // Phiếu 2 trong khoảng ngày của phiếu, qua
-        // LayDiaDiemRoRangCuaNhaThauAsync (CHỈ Phiếu 2 — Phiếu 1 không có
-        // liên kết nào tới DiaDiemNhaAn, xác nhận nghiệp vụ 2026-09-02).
-        // Idempotent: chỉ thêm dòng cho cặp (NhaThauId, DiaDiemNhaAnId) CHƯA
-        // có, KHÔNG tự xóa dòng cũ nếu 1 địa điểm sau này không còn "rõ
-        // ràng" nữa — giữ lịch sử, giống Bảng 4. Giá trị lưu ở GiaTriChung
-        // (nhà thầu đã cố định ở CẤP DÒNG nên không cần chia cột nữa).
-        private async Task DongBoBang5TuPhieu2Async(Phieu4Bang bang5, Phieu4TongHop phieu, List<Phieu4NhaThau> danhSachNhaThau)
-        {
-            var dongHienTai = await _dongRepository.FindAsync(x => x.BangId == bang5.Id);
-            var capDaCo = dongHienTai
-                .Where(x => x.NhaThauId.HasValue && x.DiaDiemNhaAnId.HasValue)
-                .Select(x => (NhaThauId: x.NhaThauId!.Value, DiaDiemNhaAnId: x.DiaDiemNhaAnId!.Value))
-                .ToHashSet();
-            var stt = dongHienTai.Count == 0 ? 0 : dongHienTai.Max(x => x.Stt ?? 0);
-
-            var tatCaDiaDiemId = new HashSet<int>();
-            var capMoi = new List<(int NhaThauId, int DiaDiemNhaAnId)>();
-            foreach (var cot in danhSachNhaThau)
-            {
-                var diaDiemRoRang = await LayDiaDiemRoRangCuaNhaThauAsync(cot.NhaThauId, phieu.TuNgay, phieu.DenNgay);
-                foreach (var diaDiemId in diaDiemRoRang)
-                {
-                    tatCaDiaDiemId.Add(diaDiemId);
-                    if (!capDaCo.Contains((cot.NhaThauId, diaDiemId)))
-                        capMoi.Add((cot.NhaThauId, diaDiemId));
-                }
-            }
-            if (capMoi.Count == 0) return;
-
-            var tenDiaDiem = (await _diaDiemNhaAnRepository.FindAsync(x => tatCaDiaDiemId.Contains(x.ID)))
-                .ToDictionary(x => x.ID, x => x.DiaDiem);
-
-            var dongMoi = new List<Phieu4Dong>();
-            foreach (var (nhaThauId, diaDiemId) in capMoi)
-            {
-                dongMoi.Add(new Phieu4Dong
-                {
-                    BangId = bang5.Id,
-                    Stt = ++stt,
-                    NoiDung = tenDiaDiem.TryGetValue(diaDiemId, out var ten) ? ten : $"Địa điểm #{diaDiemId}",
-                    Dvt = "Suất",
-                    LoaiDong = "NHAP_TAY",
-                    DiaDiemNhaAnId = diaDiemId,
-                    NhaThauId = nhaThauId,
-                });
-            }
-
-            await _dongRepository.AddRangeAsync(dongMoi);
-            await _unitOfWork.SaveChangesAsync();
         }
 
         // Ghi giá trị tính tự động vào danh sách đã tải sẵn (tránh N+1 query) —

@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace DanhGiaAPI.Entities
 {
     public class ChuKyPhieu
@@ -26,5 +28,14 @@ namespace DanhGiaAPI.Entities
         // BuocThuTu" (cùng LuotKy) với "các lượt ký cũ đã bị từ chối" (LuotKy nhỏ
         // hơn). Xem LuongTrinhKy.md.
         public int LuotKy { get; set; } = 1;
+
+        // Concurrency token (SQL Server ROWVERSION) — chặn race condition khi
+        // 2 người CÙNG đủ điều kiện ký (VD 2 tài khoản cùng nhà thầu) bấm Ký
+        // gần như đồng thời: request nào SaveChangesAsync trước thắng, request
+        // sau bị EF ném DbUpdateConcurrencyException (xem
+        // ChuKyPhieuService.KyAsync/TuChoiAsync/DatNguoiKyDuKienAsync) thay vì
+        // âm thầm ghi đè lẫn nhau. Xem migration_chukyphieu_rowversion.sql.
+        [Timestamp]
+        public byte[] RowVersion { get; set; } = null!;
     }
 }

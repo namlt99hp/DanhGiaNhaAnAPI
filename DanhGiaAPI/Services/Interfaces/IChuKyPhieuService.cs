@@ -11,7 +11,9 @@ namespace DanhGiaAPI.Services.Interfaces
 
         // Tiến độ ký hiện tại (1 dòng mới nhất / BuocThuTu — nếu phiếu bị từ chối
         // rồi khởi tạo lại, các dòng cũ của lượt trước vẫn còn trong DB để audit).
-        Task<List<ChuKyPhieu>> TienDoKyAsync(string loaiPhieu, int doiTuongId);
+        // Trả DTO (không phải entity) vì có resolve thêm DuongDanChuKy để FE
+        // render ảnh chữ ký — xem DTOs/LuongKy/ChuKyPhieuDto.cs.
+        Task<List<ChuKyPhieuDto>> TienDoKyAsync(string loaiPhieu, int doiTuongId);
 
         // CHUA_KHOI_TAO | CHO_KY | DA_DUYET | TU_CHOI — Service của Phiếu tự đọc
         // giá trị này để đồng bộ cột TrangThai của bảng phiếu chính (không có

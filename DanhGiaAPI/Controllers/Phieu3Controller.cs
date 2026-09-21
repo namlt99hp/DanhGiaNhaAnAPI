@@ -1,4 +1,5 @@
 using DanhGiaAPI.Common;
+using DanhGiaAPI.DTOs.Common;
 using DanhGiaAPI.DTOs.Phieu3;
 using DanhGiaAPI.Extensions;
 using DanhGiaAPI.Services.Interfaces;
@@ -31,22 +32,30 @@ namespace DanhGiaAPI.Controllers
                 throw new ApiException("Tài khoản nhà thầu không có quyền tạo phiếu mới", StatusCodes.Status403Forbidden);
         }
 
-        // GET api/phieu3?nhaThauId=&thang=&nam=&trangThai=
+        // GET api/phieu3?nhaThauId=&thang=&nam=&trangThai=&tuNgay=&denNgay=&tuKhoa=&chiCuaToi=&page=&pageSize=
         [HttpGet]
         public async Task<IActionResult> DanhSach(
             [FromQuery] int? nhaThauId,
             [FromQuery] int? thang,
             [FromQuery] int? nam,
-            [FromQuery] string? trangThai)
+            [FromQuery] string? trangThai,
+            [FromQuery] DateTime? tuNgay,
+            [FromQuery] DateTime? denNgay,
+            [FromQuery] string? tuKhoa,
+            [FromQuery] bool chiCuaToi = false,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20)
         {
-            return Ok(await _phieu3Service.DanhSachAsync(nhaThauId, thang, nam, trangThai, User.GetNhaThauId()));
+            return Ok(await _phieu3Service.DanhSachAsync(
+                nhaThauId, thang, nam, trangThai, tuNgay, denNgay, tuKhoa, chiCuaToi, page, pageSize,
+                User.GetNhaThauId(), User.GetNguoiDungId(), User.GetLaAdmin()));
         }
 
         // GET api/phieu3/5
         [HttpGet("{id}")]
         public async Task<IActionResult> ChiTiet(int id)
         {
-            return Ok(await _phieu3Service.ChiTietAsync(id, User.GetNhaThauId()));
+            return Ok(await _phieu3Service.ChiTietAsync(id, User.GetNhaThauId(), User.GetNguoiDungId(), User.GetLaAdmin()));
         }
 
         // POST api/phieu3 — tạo phiếu + tự động tính Bảng 1 + khởi tạo khung Bảng 2
@@ -54,7 +63,7 @@ namespace DanhGiaAPI.Controllers
         public async Task<IActionResult> Them([FromBody] Phieu3Request request)
         {
             ChanTaoPhieuNhaThau();
-            return Ok(await _phieu3Service.ThemAsync(request, User.GetNguoiDungId()));
+            return Ok(await _phieu3Service.ThemAsync(request, User.GetNguoiDungId(), User.GetLaAdmin()));
         }
 
         // PUT api/phieu3/5 — lưu sửa tay Bảng 1 / Bảng 2
@@ -71,11 +80,12 @@ namespace DanhGiaAPI.Controllers
             return Ok(await _phieu3Service.TinhLaiAsync(id));
         }
 
-        // DELETE api/phieu3/5 — chỉ khi NHAP
+        // DELETE api/phieu3/5 — chỉ khi NHAP, trừ Admin (xóa được ở mọi trạng
+        // thái, kèm dọn dẹp dữ liệu luồng ký liên quan)
         [HttpDelete("{id}")]
         public async Task<IActionResult> Xoa(int id)
         {
-            await _phieu3Service.XoaAsync(id);
+            await _phieu3Service.XoaAsync(id, User.GetLaAdmin());
             return Ok(new { message = "Đã xóa báo cáo." });
         }
 
@@ -98,6 +108,21 @@ namespace DanhGiaAPI.Controllers
         public async Task<IActionResult> PhanHoiYKienNhaThau(int id, [FromBody] Phieu3YKienNhaThauRequest request)
         {
             return Ok(await _phieu3Service.PhanHoiYKienNhaThauAsync(id, request));
+        }
+
+        // POST api/phieu3/5/doan — thêm 1 đoạn thời gian + địa điểm (chỉ
+        // NHAP/TU_CHOI), tự tính lại Bảng 1 sau khi thêm
+        [HttpPost("{id}/doan")]
+        public async Task<IActionResult> ThemDoan(int id, [FromBody] DoanRequest request)
+        {
+            return Ok(await _phieu3Service.ThemDoanAsync(id, request));
+        }
+
+        // DELETE api/phieu3/5/doan/7
+        [HttpDelete("{id}/doan/{doanId}")]
+        public async Task<IActionResult> XoaDoan(int id, int doanId)
+        {
+            return Ok(await _phieu3Service.XoaDoanAsync(id, doanId));
         }
     }
 }

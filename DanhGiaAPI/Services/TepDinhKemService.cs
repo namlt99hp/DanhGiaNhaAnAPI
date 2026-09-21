@@ -13,7 +13,13 @@ namespace DanhGiaAPI.Services
         private const string ThuMucUpload = "dinh-kem";
         private const string LoaiDoiTuongCkeditor = "GHI_CHU_CKEDITOR";
         private static readonly string[] DuoiChoPhep = { ".png", ".jpg", ".jpeg" };
-        private const long DungLuongToiDa = 5 * 1024 * 1024; // 5MB
+        // Ảnh chụp thẳng từ camera điện thoại thường nặng hơn nhiều so với ảnh
+        // chụp màn hình (có thể 8-15MB tùy độ phân giải cảm biến) — nâng lên
+        // 15MB để không chặn nhầm ảnh hợp lệ. Nhớ nâng client_max_body_size
+        // tương ứng ở nginx phía trước, nếu không nginx sẽ tự cắt kết nối
+        // trước khi request tới được đây (FE sẽ thấy "Lỗi mạng" chứ không phải
+        // message lỗi rõ ràng bên dưới).
+        private const long DungLuongToiDa = 15 * 1024 * 1024; // 15MB
 
         private readonly ITepDinhKemRepository _tepDinhKemRepository;
         private readonly IUnitOfWork _unitOfWork;
@@ -108,7 +114,7 @@ namespace DanhGiaAPI.Services
             if (file == null || file.Length == 0)
                 throw new ApiException("Chưa chọn file để tải lên");
             if (file.Length > DungLuongToiDa)
-                throw new ApiException("File vượt quá 5MB");
+                throw new ApiException("File vượt quá 15MB");
 
             var duoi = Path.GetExtension(file.FileName).ToLowerInvariant();
             if (!DuoiChoPhep.Contains(duoi))

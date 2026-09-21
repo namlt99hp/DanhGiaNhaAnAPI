@@ -13,5 +13,9 @@ namespace DanhGiaAPI.DTOs.QuanLyTaiKhoan
         public string Ten { get; set; } = null!;
 
         public bool DangHoatDong { get; set; } = true;
+
+        // Loại phiếu phòng ban này được phép xử lý — rỗng = không giới hạn
+        // (mọi loại phiếu), xem Entities/PhongBanLoaiPhieu.cs.
+        public List<string> CacLoaiPhieuApDung { get; set; } = new();
     }
 }

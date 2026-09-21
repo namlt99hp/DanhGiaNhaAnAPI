@@ -6,6 +6,7 @@ using DanhGiaAPI.Services;
 using DanhGiaAPI.Services.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
@@ -51,6 +52,7 @@ builder.Services.AddScoped<IVaiTroRepository, VaiTroRepository>();
 builder.Services.AddScoped<IQuyenRepository, QuyenRepository>();
 builder.Services.AddScoped<IVaiTroQuyenRepository, VaiTroQuyenRepository>();
 builder.Services.AddScoped<IPhongBanRepository, PhongBanRepository>();
+builder.Services.AddScoped<IPhongBanLoaiPhieuRepository, PhongBanLoaiPhieuRepository>();
 builder.Services.AddScoped<INhaThauRepository, NhaThauRepository>();
 builder.Services.AddScoped<IBepAnRepository, BepAnRepository>();
 builder.Services.AddScoped<IDiaDiemNhaAnRepository, DiaDiemNhaAnRepository>();
@@ -86,6 +88,11 @@ builder.Services.AddScoped<IPhieu4BangRepository, Phieu4BangRepository>();
 builder.Services.AddScoped<IPhieu4DongRepository, Phieu4DongRepository>();
 builder.Services.AddScoped<IPhieu4GiaTriRepository, Phieu4GiaTriRepository>();
 builder.Services.AddScoped<IDuLieuComRepository, DuLieuComRepository>();
+builder.Services.AddScoped<IPhieu3DoanRepository, Phieu3DoanRepository>();
+builder.Services.AddScoped<IPhieu3DoanDiaDiemRepository, Phieu3DoanDiaDiemRepository>();
+builder.Services.AddScoped<IPhieu4DoanRepository, Phieu4DoanRepository>();
+builder.Services.AddScoped<IPhieu4DoanDiaDiemRepository, Phieu4DoanDiaDiemRepository>();
+builder.Services.AddScoped<IBuaAnRepository, BuaAnRepository>();
 
 // Đăng ký Service cho module đăng nhập/quản lý tài khoản/danh mục
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -109,6 +116,11 @@ builder.Services.AddScoped<IMauLuongKyService, MauLuongKyService>();
 builder.Services.AddScoped<IChuKyPhieuService, ChuKyPhieuService>();
 builder.Services.AddScoped<IPhieuNhaThauResolver, PhieuNhaThauResolver>();
 builder.Services.AddScoped<INhatKyChinhSuaService, NhatKyChinhSuaService>();
+builder.Services.AddScoped<IQuyenXemPhieuService, QuyenXemPhieuService>();
+
+// Chuyển đổi docx -> pdf (xuất PDF Phiếu 1/2) qua LibreOffice headless — xem
+// ChuyenDoiFileService, cần cài LibreOffice trên server.
+builder.Services.AddScoped<IChuyenDoiFileService, ChuyenDoiFileService>();
 
 // Đăng ký Service cho Phiếu (1): Kiểm tra VSATTP (Giai đoạn 3 — xem
 // modules/Phieu1_KiemTraVSATTP.md)
@@ -171,6 +183,22 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+
+// Chạy sau nginx (reverse proxy) — không có middleware này thì
+// HttpContext.Connection.RemoteIpAddress (dùng để ghi log IP đăng nhập ở
+// AuthController.cs) luôn là IP của nginx chứ không phải IP thật của client.
+// Cần nginx forward header X-Forwarded-For (và Proto/Host nếu sau này có chỗ
+// khác cần Request.Scheme/Host đúng). Clear KnownProxies/KnownNetworks vì
+// nginx không chạy trên loopback của container/máy này — mặc định ASP.NET
+// Core chỉ tin proxy ở loopback.
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost
+};
+forwardedHeadersOptions.KnownNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
+
 //app.UseCors("AllowReactApp"); // Áp dụng CORS
 app.UseCors("AllowAllOrigins");
 

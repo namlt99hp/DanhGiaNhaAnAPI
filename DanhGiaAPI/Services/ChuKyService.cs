@@ -84,6 +84,21 @@ namespace DanhGiaAPI.Services
             await _unitOfWork.SaveChangesAsync();
         }
 
+        public async Task XoaAsync(int nguoiDungId, int chuKyId)
+        {
+            var chuKy = await _chuKyRepository.GetByIdAndNguoiDungIdAsync(chuKyId, nguoiDungId)
+                ?? throw new ApiException("Không tìm thấy chữ ký", StatusCodes.Status404NotFound);
+
+            if (chuKy.DangSuDung)
+                throw new ApiException("Không thể xóa chữ ký đang sử dụng. Vui lòng đặt chữ ký khác làm hiện hành trước khi xóa.");
+
+            // Soft-delete: chỉ ẩn khỏi danh sách của user, KHÔNG xóa record lẫn
+            // file vật lý — xem lý do ở Entities/ChuKyNguoiDung.cs (DaXoa).
+            chuKy.DaXoa = true;
+            _chuKyRepository.Update(chuKy);
+            await _unitOfWork.SaveChangesAsync();
+        }
+
         private static ChuKyResponseDto MapToDto(ChuKyNguoiDung ck) => new()
         {
             Id = ck.Id,

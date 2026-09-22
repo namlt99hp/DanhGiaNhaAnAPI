@@ -71,6 +71,14 @@ namespace DanhGiaAPI.Controllers
             return Ok(new { message = "Đã đặt làm chữ ký hiện hành." });
         }
 
+        // DELETE api/nguoi-dung/5/chu-ky/9
+        [HttpDelete("{id}/chu-ky/{chuKyId}")]
+        public async Task<IActionResult> XoaChuKy(int id, int chuKyId)
+        {
+            await _chuKyService.XoaAsync(id, chuKyId);
+            return Ok(new { message = "Đã xóa chữ ký." });
+        }
+
         // POST api/nguoi-dung/5/duyet
         [HttpPost("{id}/duyet")]
         public async Task<IActionResult> Duyet(int id)

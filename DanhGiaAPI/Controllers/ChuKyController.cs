@@ -40,5 +40,13 @@ namespace DanhGiaAPI.Controllers
             await _chuKyService.KichHoatAsync(User.GetNguoiDungId(), id);
             return Ok(new { message = "Đã đặt làm chữ ký hiện hành." });
         }
+
+        // DELETE api/chu-ky/5
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Xoa(int id)
+        {
+            await _chuKyService.XoaAsync(User.GetNguoiDungId(), id);
+            return Ok(new { message = "Đã xóa chữ ký." });
+        }
     }
 }

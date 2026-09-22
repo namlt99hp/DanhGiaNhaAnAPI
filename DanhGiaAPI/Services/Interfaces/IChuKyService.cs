@@ -8,5 +8,6 @@ namespace DanhGiaAPI.Services.Interfaces
         Task<ChuKyResponseDto> UploadAsync(int nguoiDungId, IFormFile file);
         Task<List<ChuKyResponseDto>> DanhSachAsync(int nguoiDungId);
         Task KichHoatAsync(int nguoiDungId, int chuKyId);
+        Task XoaAsync(int nguoiDungId, int chuKyId);
     }
 }

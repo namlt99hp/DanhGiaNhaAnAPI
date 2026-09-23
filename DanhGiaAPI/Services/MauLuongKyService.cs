@@ -10,12 +10,22 @@ namespace DanhGiaAPI.Services
     public class MauLuongKyService : IMauLuongKyService
     {
         private readonly IMauLuongKyRepository _mauLuongKyRepository;
+        private readonly IPhongBanRepository _phongBanRepository;
         private readonly IUnitOfWork _unitOfWork;
 
-        public MauLuongKyService(IMauLuongKyRepository mauLuongKyRepository, IUnitOfWork unitOfWork)
+        public MauLuongKyService(IMauLuongKyRepository mauLuongKyRepository, IPhongBanRepository phongBanRepository, IUnitOfWork unitOfWork)
         {
             _mauLuongKyRepository = mauLuongKyRepository;
+            _phongBanRepository = phongBanRepository;
             _unitOfWork = unitOfWork;
+        }
+
+        // Phòng ban ký chọn MỚI phải còn hoạt động (xem Common/DanhMucHoatDong.cs)
+        private async Task KiemTraPhongBanAsync(int phongBanId)
+        {
+            var phongBan = await _phongBanRepository.GetByIdAsync(phongBanId)
+                ?? throw new ApiException("Không tìm thấy phòng ban");
+            DanhMucHoatDong.KiemTraPhongBan(phongBan);
         }
 
         public async Task<List<MauLuongKy>> DanhSachAsync(string? loaiPhieu)
@@ -37,6 +47,8 @@ namespace DanhGiaAPI.Services
         public async Task<MauLuongKy> ThemAsync(MauLuongKyRequest request)
         {
             KiemTraLoaiNguoiKy(request);
+            if (request.PhongBanId.HasValue)
+                await KiemTraPhongBanAsync(request.PhongBanId.Value);
 
             var mau = new MauLuongKy
             {
@@ -58,6 +70,10 @@ namespace DanhGiaAPI.Services
 
             var mau = await _mauLuongKyRepository.GetByIdAsync(id)
                 ?? throw new ApiException("Không tìm thấy bước trong luồng ký", StatusCodes.Status404NotFound);
+
+            // Giữ nguyên phòng ban cũ (dù đã ngừng) vẫn lưu được — chỉ chặn khi đổi.
+            if (request.PhongBanId.HasValue && request.PhongBanId != mau.PhongBanId)
+                await KiemTraPhongBanAsync(request.PhongBanId.Value);
 
             mau.LoaiPhieu = request.LoaiPhieu.Trim();
             mau.BuocThuTu = request.BuocThuTu;

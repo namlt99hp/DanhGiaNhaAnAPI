@@ -70,6 +70,7 @@ namespace DanhGiaAPI.Services
         private readonly IKetQuaDanhGiaRepository  _ketQuaDanhGiaRepository;
         private readonly IDuLieuComRepository      _duLieuComRepository;
         private readonly INhaThauRepository        _nhaThauRepository;
+        private readonly IDiaDiemNhaAnRepository   _diaDiemNhaAnRepository;
         private readonly IPhongBanRepository       _phongBanRepository;
         private readonly INguoiDungPhieuQuyenRepository _nguoiDungPhieuQuyenRepository;
         private readonly IQuyenXemPhieuService     _quyenXemPhieuService;
@@ -116,6 +117,7 @@ namespace DanhGiaAPI.Services
             IKetQuaDanhGiaRepository ketQuaDanhGiaRepository,
             IDuLieuComRepository duLieuComRepository,
             INhaThauRepository nhaThauRepository,
+            IDiaDiemNhaAnRepository diaDiemNhaAnRepository,
             IPhongBanRepository phongBanRepository,
             INguoiDungPhieuQuyenRepository nguoiDungPhieuQuyenRepository,
             IQuyenXemPhieuService quyenXemPhieuService,
@@ -140,6 +142,7 @@ namespace DanhGiaAPI.Services
             _ketQuaDanhGiaRepository = ketQuaDanhGiaRepository;
             _duLieuComRepository    = duLieuComRepository;
             _nhaThauRepository      = nhaThauRepository;
+            _diaDiemNhaAnRepository = diaDiemNhaAnRepository;
             _phongBanRepository     = phongBanRepository;
             _nguoiDungPhieuQuyenRepository = nguoiDungPhieuQuyenRepository;
             _quyenXemPhieuService   = quyenXemPhieuService;
@@ -329,6 +332,8 @@ namespace DanhGiaAPI.Services
             var nhaThauHopLe = await _nhaThauRepository.FindAsync(x => nhaThauIds.Contains(x.Id));
             if (nhaThauHopLe.Count != nhaThauIds.Count)
                 throw new ApiException("Có nhà thầu không tồn tại trong danh sách đã chọn");
+            foreach (var nt in nhaThauHopLe)
+                DanhMucHoatDong.KiemTraNhaThau(nt);
 
             var tuNgayPhieu = request.TuNgay.Date;
             var denNgayPhieu = request.DenNgay.Date;
@@ -446,8 +451,9 @@ namespace DanhGiaAPI.Services
             if (phieu.TrangThai != "NHAP" && phieu.TrangThai != "TU_CHOI")
                 throw new ApiException("Chỉ có thể thêm nhà thầu khi phiếu ở trạng thái Nháp hoặc Từ chối");
 
-            _ = await _nhaThauRepository.GetByIdAsync(nhaThauId)
+            var nhaThau = await _nhaThauRepository.GetByIdAsync(nhaThauId)
                 ?? throw new ApiException("Không tìm thấy nhà thầu");
+            DanhMucHoatDong.KiemTraNhaThau(nhaThau);
 
             var danhSachHienTai = await _nhaThauCotRepository.FindAsync(x => x.PhieuId == id);
             if (danhSachHienTai.Any(x => x.NhaThauId == nhaThauId))
@@ -809,6 +815,7 @@ namespace DanhGiaAPI.Services
             foreach (var req in danhSachDoan)
             {
                 KiemTraDoanHopLe(req, buaAnThuTu, tuNgayPhieu, denNgayPhieu);
+                await DanhMucHoatDong.KiemTraDiaDiemNhaAnAsync(_diaDiemNhaAnRepository, req.DiaDiemNhaAnIds);
                 var doan = new Phieu4Doan
                 {
                     NhaThauCotId = nhaThauCotId,
@@ -841,6 +848,7 @@ namespace DanhGiaAPI.Services
 
             var buaAnThuTu = await LayBuaAnThuTuAsync();
             KiemTraDoanHopLe(request, buaAnThuTu, phieu.TuNgay, phieu.DenNgay);
+            await DanhMucHoatDong.KiemTraDiaDiemNhaAnAsync(_diaDiemNhaAnRepository, request.DiaDiemNhaAnIds);
 
             var doan = new Phieu4Doan
             {

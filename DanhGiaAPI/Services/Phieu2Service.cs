@@ -35,6 +35,7 @@ namespace DanhGiaAPI.Services
         private readonly IPhieu1KiemTraRepository     _phieu1Repository;
         private readonly IPhieu1KetLuanRepository     _phieu1KetLuanRepository;
         private readonly INhaThauRepository           _nhaThauRepository;
+        private readonly IBepAnRepository             _bepAnRepository;
         private readonly IDiaDiemNhaAnRepository      _diaDiemNhaAnRepository;
         private readonly IPhieu2NhaAnRepository       _phieu2NhaAnRepository;
         private readonly INguoiDungPhieuQuyenRepository _nguoiDungPhieuQuyenRepository;
@@ -54,6 +55,7 @@ namespace DanhGiaAPI.Services
             IPhieu1KiemTraRepository     phieu1Repository,
             IPhieu1KetLuanRepository     phieu1KetLuanRepository,
             INhaThauRepository           nhaThauRepository,
+            IBepAnRepository             bepAnRepository,
             IDiaDiemNhaAnRepository      diaDiemNhaAnRepository,
             IPhieu2NhaAnRepository       phieu2NhaAnRepository,
             INguoiDungPhieuQuyenRepository nguoiDungPhieuQuyenRepository,
@@ -72,6 +74,7 @@ namespace DanhGiaAPI.Services
             _phieu1Repository        = phieu1Repository;
             _phieu1KetLuanRepository = phieu1KetLuanRepository;
             _nhaThauRepository       = nhaThauRepository;
+            _bepAnRepository         = bepAnRepository;
             _diaDiemNhaAnRepository  = diaDiemNhaAnRepository;
             _phieu2NhaAnRepository   = phieu2NhaAnRepository;
             _nguoiDungPhieuQuyenRepository = nguoiDungPhieuQuyenRepository;
@@ -283,7 +286,11 @@ namespace DanhGiaAPI.Services
             // Validate nhà ăn — cho chọn NHIỀU nhà ăn (đánh giá 1 lần cho nhiều
             // nhà ăn của cùng bếp ăn), không ràng buộc theo BepAnId (chưa có
             // liên kết chính thức Bếp ăn <-> Nhà ăn, xem comment đầu class).
-            var nhaAnIds = await KiemTraNhaAnAsync(request.NhaAnIds);
+            var nhaAnIds = await KiemTraNhaAnAsync(request.NhaAnIds, new List<int>());
+
+            // Bếp ăn tùy chọn — nếu có thì phải còn hoạt động
+            if (request.BepAnId.HasValue)
+                await KiemTraBepAnHoatDongAsync(request.BepAnId.Value);
 
             // Validate Phiếu 1 — không bắt buộc: ngày đó có thể chỉ kiểm tra nhà
             // ăn mà không lập Phiếu 1, khi đó điểm VSATTP để trống, nhập tay sau.
@@ -301,6 +308,7 @@ namespace DanhGiaAPI.Services
             // Validate nhà thầu
             var nhaThau = await _nhaThauRepository.GetByIdAsync(request.NhaThauId)
                 ?? throw new ApiException("Không tìm thấy nhà thầu");
+            DanhMucHoatDong.KiemTraNhaThau(nhaThau);
 
             // Sinh số hiệu: {seq:003}/{năm}/PĐGCLDVSA
             var soHieu = await SinhSoHieuAsync(request.Nam);
@@ -376,8 +384,14 @@ namespace DanhGiaAPI.Services
             if (phieu.TrangThai != "NHAP" && phieu.TrangThai != "TU_CHOI")
                 throw new ApiException("Chỉ có thể sửa phiếu ở trạng thái Nháp hoặc Từ chối");
 
-            // Validate nhà ăn — cho chọn nhiều (xem ThemAsync)
-            var nhaAnIds = await KiemTraNhaAnAsync(request.NhaAnIds);
+            // Validate nhà ăn — cho chọn nhiều (xem ThemAsync). Nhà ăn đã có trên
+            // phiếu được giữ lại dù đã ngừng hoạt động (giữ lịch sử).
+            var nhaAnIdsDaLuu = (await _phieu2NhaAnRepository.FindAsync(x => x.PhieuId == id)).Select(x => x.NhaAnId).ToList();
+            var nhaAnIds = await KiemTraNhaAnAsync(request.NhaAnIds, nhaAnIdsDaLuu);
+
+            // Chỉ chặn bếp ăn đã ngừng khi ĐỔI sang bếp ăn khác (xem Common/DanhMucHoatDong.cs)
+            if (request.BepAnId.HasValue && request.BepAnId != phieu.BepAnId)
+                await KiemTraBepAnHoatDongAsync(request.BepAnId.Value);
 
             // Validate Phiếu 1 — không bắt buộc (xem ThemAsync)
             Phieu1KetLuan? phieu1KetLuan = null;
@@ -588,7 +602,9 @@ namespace DanhGiaAPI.Services
         // phải tồn tại trong danh mục DiaDiemNhaAn. Không ràng buộc theo
         // BepAnId (chưa có liên kết chính thức Bếp ăn <-> Nhà ăn, chọn tự do —
         // xác nhận nghiệp vụ 2026-08-27, xem Phieu2_DanhGiaSuatAn.md).
-        private async Task<List<DiaDiemNhaAn>> KiemTraNhaAnAsync(List<int> nhaAnIds)
+        // nhaAnIdsDaLuu: nhà ăn đã có trên phiếu — được giữ lại dù đã ngừng
+        // hoạt động; nhà ăn chọn MỚI thì phải còn hoạt động.
+        private async Task<List<DiaDiemNhaAn>> KiemTraNhaAnAsync(List<int> nhaAnIds, List<int> nhaAnIdsDaLuu)
         {
             var idsHopLe = (nhaAnIds ?? new List<int>()).Distinct().ToList();
             if (idsHopLe.Count == 0)
@@ -598,7 +614,18 @@ namespace DanhGiaAPI.Services
             if (danhSach.Count != idsHopLe.Count)
                 throw new ApiException("Không tìm thấy 1 hoặc nhiều nhà ăn đã chọn");
 
+            var ngungHoatDong = danhSach.FirstOrDefault(x => !x.IsActive && !nhaAnIdsDaLuu.Contains(x.ID));
+            if (ngungHoatDong != null)
+                throw new ApiException($"Nhà ăn \"{ngungHoatDong.DiaDiem}\" đã ngừng hoạt động, không thể chọn");
+
             return danhSach;
+        }
+
+        private async Task KiemTraBepAnHoatDongAsync(int bepAnId)
+        {
+            var bepAn = await _bepAnRepository.GetByIdAsync(bepAnId)
+                ?? throw new ApiException("Không tìm thấy bếp ăn");
+            DanhMucHoatDong.KiemTraBepAn(bepAn);
         }
 
         // ============================================================

@@ -10,12 +10,22 @@ namespace DanhGiaAPI.Services
     public class TieuChiService : ITieuChiService
     {
         private readonly ITieuChiRepository _tieuChiRepository;
+        private readonly INhomTieuChiRepository _nhomTieuChiRepository;
         private readonly IUnitOfWork _unitOfWork;
 
-        public TieuChiService(ITieuChiRepository tieuChiRepository, IUnitOfWork unitOfWork)
+        public TieuChiService(ITieuChiRepository tieuChiRepository, INhomTieuChiRepository nhomTieuChiRepository, IUnitOfWork unitOfWork)
         {
             _tieuChiRepository = tieuChiRepository;
+            _nhomTieuChiRepository = nhomTieuChiRepository;
             _unitOfWork = unitOfWork;
+        }
+
+        // Nhóm chọn MỚI phải còn hoạt động (xem Common/DanhMucHoatDong.cs)
+        private async Task KiemTraNhomAsync(int nhomId)
+        {
+            var nhom = await _nhomTieuChiRepository.GetByIdAsync(nhomId)
+                ?? throw new ApiException("Không tìm thấy nhóm tiêu chí");
+            DanhMucHoatDong.KiemTraNhomTieuChi(nhom);
         }
 
         public async Task<List<TieuChi>> DanhSachAsync(int? nhomId, bool? dangHoatDong)
@@ -38,6 +48,9 @@ namespace DanhGiaAPI.Services
 
         public async Task<TieuChi> ThemAsync(TieuChiRequest request)
         {
+            if (request.NhomId.HasValue)
+                await KiemTraNhomAsync(request.NhomId.Value);
+
             var tieuChi = new TieuChi
             {
                 NhomId = request.NhomId,
@@ -58,6 +71,10 @@ namespace DanhGiaAPI.Services
         {
             var tieuChi = await _tieuChiRepository.GetByIdAsync(id)
                 ?? throw new ApiException("Không tìm thấy tiêu chí", StatusCodes.Status404NotFound);
+
+            // Giữ nguyên nhóm cũ (dù đã ngừng) vẫn lưu được — chỉ chặn khi đổi nhóm.
+            if (request.NhomId.HasValue && request.NhomId != tieuChi.NhomId)
+                await KiemTraNhomAsync(request.NhomId.Value);
 
             tieuChi.NhomId = request.NhomId;
             tieuChi.NoiDung = request.NoiDung.Trim();

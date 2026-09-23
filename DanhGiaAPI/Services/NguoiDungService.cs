@@ -25,6 +25,8 @@ namespace DanhGiaAPI.Services
         private readonly IPhieu3BaoCaoRepository _phieu3Repository;
         private readonly IPhieu4TongHopRepository _phieu4Repository;
         private readonly IQuanTriGuardService _quanTriGuardService;
+        private readonly INhaThauRepository _nhaThauRepository;
+        private readonly IPhongBanRepository _phongBanRepository;
         private readonly IUnitOfWork _unitOfWork;
 
         public NguoiDungService(
@@ -44,6 +46,8 @@ namespace DanhGiaAPI.Services
             IPhieu3BaoCaoRepository phieu3Repository,
             IPhieu4TongHopRepository phieu4Repository,
             IQuanTriGuardService quanTriGuardService,
+            INhaThauRepository nhaThauRepository,
+            IPhongBanRepository phongBanRepository,
             IUnitOfWork unitOfWork)
         {
             _nguoiDungRepository = nguoiDungRepository;
@@ -62,6 +66,8 @@ namespace DanhGiaAPI.Services
             _phieu3Repository = phieu3Repository;
             _phieu4Repository = phieu4Repository;
             _quanTriGuardService = quanTriGuardService;
+            _nhaThauRepository = nhaThauRepository;
+            _phongBanRepository = phongBanRepository;
             _unitOfWork = unitOfWork;
         }
 
@@ -203,6 +209,19 @@ namespace DanhGiaAPI.Services
                 throw new ApiException("Email đã được sử dụng");
 
             KiemTraLoaiTaiKhoan(request.PhongBanId, request.NhaThauId);
+
+            if (request.NhaThauId.HasValue)
+            {
+                var nhaThau = await _nhaThauRepository.GetByIdAsync(request.NhaThauId.Value)
+                    ?? throw new ApiException("Không tìm thấy nhà thầu");
+                DanhMucHoatDong.KiemTraNhaThau(nhaThau);
+            }
+            if (request.PhongBanId.HasValue)
+            {
+                var phongBan = await _phongBanRepository.GetByIdAsync(request.PhongBanId.Value)
+                    ?? throw new ApiException("Không tìm thấy phòng ban");
+                DanhMucHoatDong.KiemTraPhongBan(phongBan);
+            }
 
             var nguoiDung = new NguoiDung
             {

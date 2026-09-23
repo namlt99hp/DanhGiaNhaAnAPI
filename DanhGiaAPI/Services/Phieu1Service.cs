@@ -246,15 +246,17 @@ namespace DanhGiaAPI.Services
         {
             await KiemTraQuyenDanhGiaAsync(nguoiTaoId, laAdmin);
 
-            _ = await _bepAnRepository.GetByIdAsync(request.BepAnId)
+            var bepAn = await _bepAnRepository.GetByIdAsync(request.BepAnId)
                 ?? throw new ApiException("Không tìm thấy bếp ăn", StatusCodes.Status404NotFound);
+            DanhMucHoatDong.KiemTraBepAn(bepAn);
 
             // Nhà thầu do người lập phiếu tự chọn (KHÔNG suy ra từ BepAn.NhaThauId)
             // — hiện chưa có bảng liên kết đáng tin cậy giữa nhà thầu và
             // bếp ăn/nhà ăn theo thời gian (1 bếp ăn có thể đổi nhà thầu vận
             // hành qua các đợt hợp đồng khác nhau).
-            _ = await _nhaThauRepository.GetByIdAsync(request.NhaThauId)
+            var nhaThau = await _nhaThauRepository.GetByIdAsync(request.NhaThauId)
                 ?? throw new ApiException("Không tìm thấy nhà thầu", StatusCodes.Status404NotFound);
+            DanhMucHoatDong.KiemTraNhaThau(nhaThau);
 
             var phongBan = await _phongBanRepository.GetByIdAsync(request.PhongBanId)
                 ?? throw new ApiException("Không tìm thấy phòng ban", StatusCodes.Status404NotFound);
@@ -325,8 +327,19 @@ namespace DanhGiaAPI.Services
             if (phieu.TrangThai != "NHAP" && phieu.TrangThai != "TU_CHOI")
                 throw new ApiException("Chỉ có thể sửa phiếu đang ở trạng thái Nháp hoặc bị Từ chối");
 
-            _ = await _nhaThauRepository.GetByIdAsync(request.NhaThauId)
+            // Chỉ chặn bếp ăn/nhà thầu đã ngừng khi ĐỔI sang bản ghi khác — giữ
+            // nguyên giá trị cũ thì vẫn lưu được (xem Common/DanhMucHoatDong.cs).
+            if (request.BepAnId != phieu.BepAnId)
+            {
+                var bepAn = await _bepAnRepository.GetByIdAsync(request.BepAnId)
+                    ?? throw new ApiException("Không tìm thấy bếp ăn", StatusCodes.Status404NotFound);
+                DanhMucHoatDong.KiemTraBepAn(bepAn);
+            }
+
+            var nhaThau = await _nhaThauRepository.GetByIdAsync(request.NhaThauId)
                 ?? throw new ApiException("Không tìm thấy nhà thầu", StatusCodes.Status404NotFound);
+            if (request.NhaThauId != phieu.NhaThauId)
+                DanhMucHoatDong.KiemTraNhaThau(nhaThau);
 
             var ngay = request.NgayKiemTra.Date;
 

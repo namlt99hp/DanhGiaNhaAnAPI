@@ -1,3 +1,4 @@
+using DanhGiaAPI.Common;
 using DanhGiaAPI.DTOs.Auth;
 using DanhGiaAPI.Entities;
 using DanhGiaAPI.Repositories.Interfaces;
@@ -16,6 +17,8 @@ namespace DanhGiaAPI.Services
         private readonly INguoiDungVaiTroRepository _nguoiDungVaiTroRepository;
         private readonly IVaiTroRepository _vaiTroRepository;
         private readonly IPhienDangNhapRepository _phienDangNhapRepository;
+        private readonly INhaThauRepository _nhaThauRepository;
+        private readonly IPhongBanRepository _phongBanRepository;
         private readonly IUnitOfWork _unitOfWork;
         private readonly IConfiguration _configuration;
 
@@ -24,6 +27,8 @@ namespace DanhGiaAPI.Services
             INguoiDungVaiTroRepository nguoiDungVaiTroRepository,
             IVaiTroRepository vaiTroRepository,
             IPhienDangNhapRepository phienDangNhapRepository,
+            INhaThauRepository nhaThauRepository,
+            IPhongBanRepository phongBanRepository,
             IUnitOfWork unitOfWork,
             IConfiguration configuration)
         {
@@ -31,6 +36,8 @@ namespace DanhGiaAPI.Services
             _nguoiDungVaiTroRepository = nguoiDungVaiTroRepository;
             _vaiTroRepository = vaiTroRepository;
             _phienDangNhapRepository = phienDangNhapRepository;
+            _nhaThauRepository = nhaThauRepository;
+            _phongBanRepository = phongBanRepository;
             _unitOfWork = unitOfWork;
             _configuration = configuration;
         }
@@ -50,6 +57,21 @@ namespace DanhGiaAPI.Services
             // ChuKyPhieuService.KiemTraQuyenKyAsync (xem VaiTro.md).
             if (request.PhongBanId.HasValue && request.NhaThauId.HasValue)
                 throw new AuthException("Tài khoản chỉ được thuộc 1 trong 2: Phòng ban hoặc Nhà thầu, không được cả hai");
+
+            // Chỉ đăng ký vào nhà thầu/phòng ban còn hoạt động (khớp dropdown
+            // DangKyPageV2 đã lọc sẵn HOAT_DONG / dangHoatDong)
+            if (request.NhaThauId.HasValue)
+            {
+                var nhaThau = await _nhaThauRepository.GetByIdAsync(request.NhaThauId.Value)
+                    ?? throw new AuthException("Không tìm thấy nhà thầu");
+                DanhMucHoatDong.KiemTraNhaThau(nhaThau);
+            }
+            if (request.PhongBanId.HasValue)
+            {
+                var phongBan = await _phongBanRepository.GetByIdAsync(request.PhongBanId.Value)
+                    ?? throw new AuthException("Không tìm thấy phòng ban");
+                DanhMucHoatDong.KiemTraPhongBan(phongBan);
+            }
 
             var nguoiDung = new NguoiDung
             {

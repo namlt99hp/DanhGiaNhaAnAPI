@@ -10,12 +10,22 @@ namespace DanhGiaAPI.Services
     public class BepAnService : IBepAnService
     {
         private readonly IBepAnRepository _bepAnRepository;
+        private readonly INhaThauRepository _nhaThauRepository;
         private readonly IUnitOfWork _unitOfWork;
 
-        public BepAnService(IBepAnRepository bepAnRepository, IUnitOfWork unitOfWork)
+        public BepAnService(IBepAnRepository bepAnRepository, INhaThauRepository nhaThauRepository, IUnitOfWork unitOfWork)
         {
             _bepAnRepository = bepAnRepository;
+            _nhaThauRepository = nhaThauRepository;
             _unitOfWork = unitOfWork;
+        }
+
+        // Nhà thầu vận hành chọn MỚI phải còn hoạt động (xem Common/DanhMucHoatDong.cs)
+        private async Task KiemTraNhaThauAsync(int nhaThauId)
+        {
+            var nhaThau = await _nhaThauRepository.GetByIdAsync(nhaThauId)
+                ?? throw new ApiException("Không tìm thấy nhà thầu");
+            DanhMucHoatDong.KiemTraNhaThau(nhaThau);
         }
 
         public async Task<List<BepAn>> DanhSachAsync(int? nhaThauId, string? trangThai)
@@ -43,6 +53,9 @@ namespace DanhGiaAPI.Services
             if (await _bepAnRepository.GetByMaAsync(ma) != null)
                 throw new ApiException("Mã bếp ăn đã tồn tại");
 
+            if (request.NhaThauId.HasValue)
+                await KiemTraNhaThauAsync(request.NhaThauId.Value);
+
             var bepAn = new BepAn
             {
                 Ma = ma,
@@ -65,6 +78,10 @@ namespace DanhGiaAPI.Services
             var trung = await _bepAnRepository.GetByMaAsync(ma);
             if (trung != null && trung.Id != id)
                 throw new ApiException("Mã bếp ăn đã tồn tại");
+
+            // Giữ nguyên nhà thầu cũ (dù đã ngừng) vẫn lưu được — chỉ chặn khi đổi.
+            if (request.NhaThauId.HasValue && request.NhaThauId != bepAn.NhaThauId)
+                await KiemTraNhaThauAsync(request.NhaThauId.Value);
 
             bepAn.Ma = ma;
             bepAn.Ten = request.Ten.Trim();

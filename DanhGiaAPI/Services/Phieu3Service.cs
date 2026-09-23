@@ -67,6 +67,7 @@ namespace DanhGiaAPI.Services
         private readonly IKetQuaDanhGiaRepository       _ketQuaDanhGiaRepository;
         private readonly IDuLieuComRepository           _duLieuComRepository;
         private readonly INhaThauRepository             _nhaThauRepository;
+        private readonly IDiaDiemNhaAnRepository        _diaDiemNhaAnRepository;
         private readonly IPhongBanRepository            _phongBanRepository;
         private readonly INguoiDungPhieuQuyenRepository _nguoiDungPhieuQuyenRepository;
         private readonly IQuyenXemPhieuService          _quyenXemPhieuService;
@@ -104,6 +105,7 @@ namespace DanhGiaAPI.Services
             IKetQuaDanhGiaRepository       ketQuaDanhGiaRepository,
             IDuLieuComRepository           duLieuComRepository,
             INhaThauRepository             nhaThauRepository,
+            IDiaDiemNhaAnRepository        diaDiemNhaAnRepository,
             IPhongBanRepository            phongBanRepository,
             INguoiDungPhieuQuyenRepository nguoiDungPhieuQuyenRepository,
             IQuyenXemPhieuService          quyenXemPhieuService,
@@ -128,6 +130,7 @@ namespace DanhGiaAPI.Services
             _ketQuaDanhGiaRepository = ketQuaDanhGiaRepository;
             _duLieuComRepository    = duLieuComRepository;
             _nhaThauRepository      = nhaThauRepository;
+            _diaDiemNhaAnRepository = diaDiemNhaAnRepository;
             _phongBanRepository     = phongBanRepository;
             _nguoiDungPhieuQuyenRepository = nguoiDungPhieuQuyenRepository;
             _quyenXemPhieuService   = quyenXemPhieuService;
@@ -286,6 +289,7 @@ namespace DanhGiaAPI.Services
 
             var nhaThau = await _nhaThauRepository.GetByIdAsync(request.NhaThauId)
                 ?? throw new ApiException("Không tìm thấy nhà thầu");
+            DanhMucHoatDong.KiemTraNhaThau(nhaThau);
 
             var daTonTai = await _phieuRepository.AnyAsync(x =>
                 x.Thang == request.Thang && x.Nam == request.Nam && x.NhaThauId == request.NhaThauId);
@@ -625,6 +629,7 @@ namespace DanhGiaAPI.Services
 
             var buaAnThuTu = await LayBuaAnThuTuAsync();
             KiemTraDoanHopLe(request, buaAnThuTu);
+            await DanhMucHoatDong.KiemTraDiaDiemNhaAnAsync(_diaDiemNhaAnRepository, request.DiaDiemNhaAnIds);
 
             var doan = new Phieu3Doan
             {
@@ -804,6 +809,7 @@ namespace DanhGiaAPI.Services
             foreach (var req in danhSachDoan)
             {
                 KiemTraDoanHopLe(req, buaAnThuTu);
+                await DanhMucHoatDong.KiemTraDiaDiemNhaAnAsync(_diaDiemNhaAnRepository, req.DiaDiemNhaAnIds);
                 var doan = new Phieu3Doan
                 {
                     PhieuId = phieuId,

@@ -112,6 +112,7 @@ builder.Services.AddScoped<ITieuChiService, TieuChiService>();
 // 02. Phantich/Features.md + modules/LuongTrinhKy.md)
 builder.Services.AddScoped<ISoHieuService, SoHieuService>();
 builder.Services.AddScoped<ITepDinhKemService, TepDinhKemService>();
+builder.Services.AddHttpContextAccessor(); // TepDinhKemService.LayUrlGocApi
 builder.Services.AddScoped<IMauLuongKyService, MauLuongKyService>();
 builder.Services.AddScoped<IChuKyPhieuService, ChuKyPhieuService>();
 builder.Services.AddScoped<IPhieuNhaThauResolver, PhieuNhaThauResolver>();

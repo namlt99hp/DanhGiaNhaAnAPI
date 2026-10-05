@@ -3,7 +3,8 @@ namespace DanhGiaAPI.Entities
     public class Phieu1KiemTra
     {
         public int Id { get; set; }
-        public string SoHieu { get; set; } = null!;
+        // NULL tới khi phiếu hoàn tất ký duyệt (DA_DUYET) — xem Phieu1Service.DongBoTrangThaiAsync
+        public string? SoHieu { get; set; }
         public DateTime NgayKiemTra { get; set; }
         public int BepAnId { get; set; }
         public int NhaThauId { get; set; }

@@ -7,7 +7,7 @@ namespace DanhGiaAPI.DTOs.Phieu1
     public class Phieu1DanhSachItemDto
     {
         public int Id { get; set; }
-        public string SoHieu { get; set; } = string.Empty;
+        public string? SoHieu { get; set; }
         public DateTime NgayKiemTra { get; set; }
         public int BepAnId { get; set; }
         public int NhaThauId { get; set; }

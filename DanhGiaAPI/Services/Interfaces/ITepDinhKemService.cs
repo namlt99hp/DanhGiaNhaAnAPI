@@ -18,5 +18,11 @@ namespace DanhGiaAPI.Services.Interfaces
         // Parse HTML tìm ảnh CKEditor đang được dùng (theo DuongDanTep) rồi UPDATE
         // DoiTuongId từ NULL sang doiTuongId của dòng cha vừa lưu.
         Task ChotLienKetCkeditorAsync(int doiTuongId, string? html);
+
+        // Tách ảnh nhúng dạng base64 (src="data:image/...") trong HTML ra file
+        // + dòng TepDinhKem (DoiTuongId = NULL, chốt sau bằng
+        // ChotLienKetCkeditorAsync như ảnh upload thường), trả về HTML đã thay
+        // src bằng URL file. HTML không có ảnh base64 thì trả về nguyên vẹn.
+        Task<string?> TachAnhBase64Async(string? html, int? nguoiTaiLen);
     }
 }

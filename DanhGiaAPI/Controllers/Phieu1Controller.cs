@@ -96,5 +96,17 @@ namespace DanhGiaAPI.Controllers
         {
             return Ok(await _phieu1Service.DongBoTrangThaiAsync(id));
         }
+
+        // POST api/phieu1/chuyen-anh-base64?chayThu=true — CHỈ Admin. Chuyển 1
+        // lần ảnh base64 đã lỡ lưu trong ghi chú sang file (xem
+        // Phieu1Service.ChuyenAnhBase64CuAsync). Mặc định chạy thử (chỉ báo
+        // cáo), truyền chayThu=false mới ghi thật.
+        [HttpPost("chuyen-anh-base64")]
+        public async Task<IActionResult> ChuyenAnhBase64([FromQuery] bool chayThu = true)
+        {
+            if (!User.GetLaAdmin())
+                throw new ApiException("Chỉ Admin được chạy chức năng này", StatusCodes.Status403Forbidden);
+            return Ok(await _phieu1Service.ChuyenAnhBase64CuAsync(chayThu));
+        }
     }
 }

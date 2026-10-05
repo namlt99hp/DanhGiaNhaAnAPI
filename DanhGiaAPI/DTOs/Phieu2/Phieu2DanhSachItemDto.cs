@@ -6,7 +6,7 @@ namespace DanhGiaAPI.DTOs.Phieu2
     public class Phieu2DanhSachItemDto
     {
         public int Id { get; set; }
-        public string SoHieu { get; set; } = string.Empty;
+        public string? SoHieu { get; set; }
         public int Thang { get; set; }
         public int Nam { get; set; }
         public int NhaThauId { get; set; }

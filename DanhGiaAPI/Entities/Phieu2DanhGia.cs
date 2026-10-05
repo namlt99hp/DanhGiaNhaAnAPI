@@ -6,7 +6,8 @@ namespace DanhGiaAPI.Entities
     public class Phieu2DanhGia
     {
         public int Id { get; set; }
-        public string SoHieu { get; set; } = string.Empty;
+        // NULL tới khi phiếu hoàn tất ký duyệt (DA_DUYET) — xem Phieu2Service.DongBoTrangThaiAsync
+        public string? SoHieu { get; set; }
         public int Thang { get; set; }
         public int Nam { get; set; }
         public int NhaThauId { get; set; }

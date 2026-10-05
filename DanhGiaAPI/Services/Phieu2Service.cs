@@ -189,7 +189,7 @@ namespace DanhGiaAPI.Services
             // phải Thang/Nam (đã lọc riêng ở trên).
             if (tuNgay.HasValue) query = query.Where(x => x.ThoiGianTu >= tuNgay.Value.Date);
             if (denNgay.HasValue) query = query.Where(x => x.ThoiGianTu <= denNgay.Value.Date);
-            if (!string.IsNullOrWhiteSpace(tuKhoa)) query = query.Where(x => x.SoHieu.Contains(tuKhoa));
+            if (!string.IsNullOrWhiteSpace(tuKhoa)) query = query.Where(x => x.SoHieu != null && x.SoHieu.Contains(tuKhoa));
             if (chiCuaToi && nguoiDungId.HasValue) query = query.Where(x => x.NguoiTao == nguoiDungId.Value);
 
             var tongSo = query.Count();
@@ -310,8 +310,8 @@ namespace DanhGiaAPI.Services
                 ?? throw new ApiException("Không tìm thấy nhà thầu");
             DanhMucHoatDong.KiemTraNhaThau(nhaThau);
 
-            // Sinh số hiệu: {seq:003}/{năm}/PĐGCLDVSA
-            var soHieu = await SinhSoHieuAsync(request.Nam);
+            // Chưa cấp số hiệu — chỉ cấp khi hoàn tất ký duyệt (xem
+            // DongBoTrangThaiAsync), để phiếu Nháp bị xóa không làm khuyết số.
 
             await using var transaction = await _unitOfWork.BeginTransactionAsync();
             try
@@ -319,7 +319,6 @@ namespace DanhGiaAPI.Services
                 // Lưu phiếu chính
                 var phieu = new Phieu2DanhGia
                 {
-                    SoHieu      = soHieu,
                     Thang       = request.Thang,
                     Nam         = request.Nam,
                     NhaThauId   = request.NhaThauId,
@@ -526,6 +525,10 @@ namespace DanhGiaAPI.Services
             var trangThaiMoi = await _chuKyPhieuService.TrangThaiTongAsync("PHIEU2", id);
             if (trangThaiMoi is "DA_DUYET" or "TU_CHOI" or "CHO_KY")
             {
+                // Hoàn tất ký duyệt mới cấp số hiệu (xem CapSoHieuAsync)
+                if (trangThaiMoi == "DA_DUYET" && string.IsNullOrEmpty(phieu.SoHieu))
+                    phieu.SoHieu = await CapSoHieuAsync(phieu);
+
                 phieu.TrangThai = trangThaiMoi;
                 _phieu2Repository.Update(phieu);
                 await _unitOfWork.SaveChangesAsync();
@@ -587,11 +590,16 @@ namespace DanhGiaAPI.Services
         // Quy ước đánh số Phiếu 2 (Bảng đánh giá chất lượng dịch vụ suất ăn):
         // {seq:003}/{năm}/PĐGCLDVSA — 1 dãy số DUY NHẤT dùng chung cho toàn bộ
         // nhà thầu, bắt đầu từ 001 ngày 1/1 và reset lại vào ngày 1/1 năm sau
-        // (KHÔNG tách theo nhà thầu, KHÔNG reset theo tháng).
-        private async Task<string> SinhSoHieuAsync(int nam)
+        // (KHÔNG tách theo nhà thầu, KHÔNG reset theo tháng). CHỈ cấp khi phiếu
+        // hoàn tất ký duyệt (DA_DUYET) — phiếu chưa duyệt có SoHieu = NULL, để
+        // phiếu bị xóa giữa chừng không làm khuyết số. Năm theo Nam của phiếu
+        // (không theo ngày duyệt).
+        private async Task<string> CapSoHieuAsync(Phieu2DanhGia phieu)
         {
-            var seq = await _soHieuService.SinhSoTiepTheoAsync("PHIEU2", null, nam, null);
-            return $"{seq:D3}/{nam}/PĐGCLDVSA";
+            var nam = phieu.Nam;
+            return await _soHieuService.CapSoHieuNeuChuaCoAsync(
+                "Phieu2_DanhGia", phieu.Id, "PHIEU2", null, nam,
+                seq => $"{seq:D3}/{nam}/PĐGCLDVSA");
         }
 
         // ============================================================

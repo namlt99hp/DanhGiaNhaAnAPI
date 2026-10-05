@@ -74,6 +74,56 @@ namespace DanhGiaAPI.Services
             return tieuChi.ToDictionary(x => x.Id, x => x.NoiDung);
         }
 
+        // Lưới an toàn phía BE: ảnh base64 nhúng trong ghi chú (lọt qua FE) được
+        // tách ra file trước khi ghi DB — không để GET phiếu phải chở hàng chục
+        // MB base64 (xem TepDinhKemService.TachAnhBase64Async).
+        private async Task TachAnhBase64Async(Phieu1Request request, int? nguoiTaiLen)
+        {
+            foreach (var dong in request.ChiTiet)
+                dong.GhiChu = await _tepDinhKemService.TachAnhBase64Async(dong.GhiChu, nguoiTaiLen);
+            request.KetLuanGhiChu = await _tepDinhKemService.TachAnhBase64Async(request.KetLuanGhiChu, nguoiTaiLen);
+        }
+
+        // Chuyển 1 lần dữ liệu CŨ: các dòng chi tiết/kết luận đã lỡ lưu ảnh
+        // base64 -> tách ra file, thay src bằng URL. Áp dụng cả phiếu đã
+        // ký/duyệt (nội dung ảnh không đổi, chỉ đổi cách lưu). chayThu = true
+        // chỉ báo cáo, không ghi gì. Phải chạy trên ĐÚNG server API (file ảnh
+        // ghi vào wwwroot của tiến trình đang chạy).
+        public async Task<List<ChuyenAnhBase64KetQuaDto>> ChuyenAnhBase64CuAsync(bool chayThu)
+        {
+            var ketQua = new List<ChuyenAnhBase64KetQuaDto>();
+
+            var chiTiet = await _phieu1ChiTietRepository.FindAsync(x => x.GhiChu != null && x.GhiChu.Contains("data:image"));
+            foreach (var dong in chiTiet)
+            {
+                var truoc = dong.GhiChu!.Length;
+                if (!chayThu)
+                {
+                    dong.GhiChu = await _tepDinhKemService.TachAnhBase64Async(dong.GhiChu, null);
+                    _phieu1ChiTietRepository.Update(dong);
+                    await _unitOfWork.SaveChangesAsync();
+                    await _tepDinhKemService.ChotLienKetCkeditorAsync(dong.Id, dong.GhiChu);
+                }
+                ketQua.Add(new ChuyenAnhBase64KetQuaDto { Bang = "Phieu1_ChiTiet", Id = dong.Id, PhieuId = dong.PhieuId, SoKyTuTruoc = truoc, SoKyTuSau = dong.GhiChu?.Length ?? 0 });
+            }
+
+            var ketLuan = await _phieu1KetLuanRepository.FindAsync(x => x.GhiChu != null && x.GhiChu.Contains("data:image"));
+            foreach (var kl in ketLuan)
+            {
+                var truoc = kl.GhiChu!.Length;
+                if (!chayThu)
+                {
+                    kl.GhiChu = await _tepDinhKemService.TachAnhBase64Async(kl.GhiChu, null);
+                    _phieu1KetLuanRepository.Update(kl);
+                    await _unitOfWork.SaveChangesAsync();
+                    await _tepDinhKemService.ChotLienKetCkeditorAsync(kl.Id, kl.GhiChu);
+                }
+                ketQua.Add(new ChuyenAnhBase64KetQuaDto { Bang = "Phieu1_KetLuan", Id = kl.Id, PhieuId = kl.PhieuId, SoKyTuTruoc = truoc, SoKyTuSau = kl.GhiChu?.Length ?? 0 });
+            }
+
+            return ketQua;
+        }
+
         // Quyền "Đánh giá / nhập liệu" theo NguoiDungPhieuQuyen (xem
         // 02. Phantich/modules/VaiTro.md mục 9) — KHÔNG hard-code theo phòng
         // ban: cả P.ĐN và P.ATMT đều có thể được cấp (giữ đúng thiết kế gốc
@@ -183,7 +233,7 @@ namespace DanhGiaAPI.Services
             if (!string.IsNullOrWhiteSpace(trangThai)) query = query.Where(x => x.TrangThai == trangThai);
             if (tuNgay.HasValue) query = query.Where(x => x.NgayKiemTra >= tuNgay.Value.Date);
             if (denNgay.HasValue) query = query.Where(x => x.NgayKiemTra <= denNgay.Value.Date);
-            if (!string.IsNullOrWhiteSpace(tuKhoa)) query = query.Where(x => x.SoHieu.Contains(tuKhoa));
+            if (!string.IsNullOrWhiteSpace(tuKhoa)) query = query.Where(x => x.SoHieu != null && x.SoHieu.Contains(tuKhoa));
             if (chiCuaToi && nguoiDungId.HasValue) query = query.Where(x => x.NguoiTao == nguoiDungId.Value);
 
             query = query.OrderByDescending(x => x.NgayKiemTra).ThenByDescending(x => x.Id);
@@ -258,15 +308,15 @@ namespace DanhGiaAPI.Services
                 ?? throw new ApiException("Không tìm thấy nhà thầu", StatusCodes.Status404NotFound);
             DanhMucHoatDong.KiemTraNhaThau(nhaThau);
 
-            var phongBan = await _phongBanRepository.GetByIdAsync(request.PhongBanId)
-                ?? throw new ApiException("Không tìm thấy phòng ban", StatusCodes.Status404NotFound);
+            if (!await _phongBanRepository.AnyAsync(x => x.Id == request.PhongBanId))
+                throw new ApiException("Không tìm thấy phòng ban", StatusCodes.Status404NotFound);
 
             var ngay = request.NgayKiemTra.Date;
-            var soHieu = await SinhSoHieuAsync(phongBan.Ma, phongBan.Ma, ngay.Year);
 
+            // Chưa cấp số hiệu — chỉ cấp khi hoàn tất ký duyệt (xem
+            // DongBoTrangThaiAsync), để phiếu Nháp bị xóa không làm khuyết số.
             var phieu = new Phieu1KiemTra
             {
-                SoHieu = soHieu,
                 NgayKiemTra = ngay,
                 BepAnId = request.BepAnId,
                 NhaThauId = request.NhaThauId,
@@ -279,6 +329,8 @@ namespace DanhGiaAPI.Services
             await using var transaction = await _unitOfWork.BeginTransactionAsync();
             try
             {
+                await TachAnhBase64Async(request, nguoiTaoId);
+
                 await _phieu1Repository.AddAsync(phieu);
                 await _unitOfWork.SaveChangesAsync(); // cần Id thật của phieu trước khi ghi chi tiết/kết luận
 
@@ -355,6 +407,16 @@ namespace DanhGiaAPI.Services
             {
                 var hienTai = await _phieu1ChiTietRepository.FindAsync(x => x.PhieuId == id);
                 var idGiuLai = request.ChiTiet.Where(c => c.Id.HasValue && c.Id > 0).Select(c => c.Id!.Value).ToHashSet();
+
+                // FE gửi Id dòng không còn tồn tại (dữ liệu cũ — 2 tab/2 người
+                // cùng sửa, cache cũ...) -> chặn hẳn. Nếu bỏ qua như trước thì
+                // toàn bộ dòng hiện có bị xóa (không nằm trong idGiuLai) mà
+                // không dòng nào được thêm lại, phiếu mất sạch chi tiết.
+                var idHienTai = hienTai.Select(x => x.Id).ToHashSet();
+                if (idGiuLai.Any(x => !idHienTai.Contains(x)))
+                    throw new ApiException("Dữ liệu phiếu đã bị thay đổi ở nơi khác — vui lòng tải lại trang (F5) rồi nhập lại");
+
+                await TachAnhBase64Async(request, null);
 
                 var canXoa = hienTai.Where(x => !idGiuLai.Contains(x.Id)).ToList();
                 _phieu1ChiTietRepository.RemoveRange(canXoa);
@@ -473,6 +535,11 @@ namespace DanhGiaAPI.Services
             if (phieu.TrangThai != "NHAP")
                 throw new ApiException("Chỉ có thể gửi ký khi phiếu đang ở trạng thái Nháp");
 
+            // Kiểm tra trên dữ liệu ĐÃ LƯU, không tin vào kiểm tra ở FE (FE chỉ
+            // nhìn state trên trình duyệt — lần lưu ngay trước đó có thể đã lỗi).
+            if (!await _phieu1ChiTietRepository.AnyAsync(x => x.PhieuId == id && (x.KetQua == "DAT" || x.KetQua == "KHONG_DAT")))
+                throw new ApiException("Phiếu chưa có tiêu chí nào được đánh giá (Đạt/Không đạt) — vui lòng lưu phiếu trước khi gửi ký");
+
             phieu.TrangThai = "CHO_KY";
             _phieu1Repository.Update(phieu);
             await _unitOfWork.SaveChangesAsync();
@@ -493,6 +560,11 @@ namespace DanhGiaAPI.Services
             var trangThaiKy = await _chuKyPhieuService.TrangThaiTongAsync("PHIEU1", id);
             if (trangThaiKy is "DA_DUYET" or "TU_CHOI" or "CHO_KY")
             {
+                // Hoàn tất ký duyệt mới cấp số hiệu (gọi lặp lại vẫn giữ đúng số
+                // đã cấp, xem SoHieuService.CapSoHieuNeuChuaCoAsync).
+                if (trangThaiKy == "DA_DUYET" && string.IsNullOrEmpty(phieu.SoHieu))
+                    phieu.SoHieu = await CapSoHieuAsync(phieu);
+
                 phieu.TrangThai = trangThaiKy;
                 _phieu1Repository.Update(phieu);
                 await _unitOfWork.SaveChangesAsync();
@@ -502,8 +574,11 @@ namespace DanhGiaAPI.Services
         }
 
         // Quy ước đánh số Phiếu 1 (Phiếu kiểm tra VSATTP): {seq:003}/{năm}/
-        // PKTCTVSATTP-{tên phòng ban} — tên phòng ban lấy theo phòng ban của
-        // NGƯỜI LẬP phiếu (request.PhongBanId, tự gán = phòng ban của user
+        // PKTCTVSATTP-{tên phòng ban} — CHỈ cấp khi phiếu hoàn tất ký duyệt
+        // (DA_DUYET), phiếu Nháp/Chờ ký/Bị từ chối chưa có số (SoHieu = NULL)
+        // để phiếu bị xóa giữa chừng không làm khuyết số. Năm theo NGÀY KIỂM
+        // TRA của phiếu (không theo ngày duyệt). Tên phòng ban lấy theo phòng
+        // ban của NGƯỜI LẬP phiếu (PhongBanId, tự gán = phòng ban của user
         // đang đăng nhập lúc tạo, xem Phieu1FormPage.tsx). 1 dãy số RIÊNG cho
         // mỗi phòng ban (khóa đếm vẫn dùng Ma, không đổi khi đổi tên phòng
         // ban), bắt đầu từ 001 ngày 1/1 và reset lại vào ngày 1/1 năm sau —
@@ -512,10 +587,15 @@ namespace DanhGiaAPI.Services
         // liệt kê "Căn cứ đánh giá" theo TỪNG phòng ban (xem
         // Phieu3FormPage.tsx/canCuPhieu1) — số hiệu phải liền mạch trong phạm
         // vi 1 phòng ban để danh sách đó có ý nghĩa.
-        private async Task<string> SinhSoHieuAsync(string maPhongBan, string tenPhongBan, int nam)
+        private async Task<string> CapSoHieuAsync(Phieu1KiemTra phieu)
         {
-            var seq = await _soHieuService.SinhSoTiepTheoAsync("PHIEU1", maPhongBan, nam, null);
-            return $"{seq:D3}/{nam}/PKTCTVSATTP-{tenPhongBan}";
+            var phongBan = await _phongBanRepository.GetByIdAsync(phieu.PhongBanId)
+                ?? throw new ApiException("Không tìm thấy phòng ban lập phiếu", StatusCodes.Status404NotFound);
+            var nam = phieu.NgayKiemTra.Year;
+
+            return await _soHieuService.CapSoHieuNeuChuaCoAsync(
+                "Phieu1_KiemTra", phieu.Id, "PHIEU1", phongBan.Ma, nam,
+                seq => $"{seq:D3}/{nam}/PKTCTVSATTP-{phongBan.Ma}");
         }
 
         private static Phieu1KetLuan TinhKetLuan(int phieuId, List<Phieu1ChiTiet> chiTiet, string? ghiChu)

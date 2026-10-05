@@ -37,5 +37,7 @@ namespace DanhGiaAPI.Services.Interfaces
         // chính phiếu này — gọi sau khi FE ký/từ chối thành công qua endpoint
         // chung /api/chu-ky-phieu/{id}/ky|tu-choi (xem LuongTrinhKy.md).
         Task<Phieu1KiemTra> DongBoTrangThaiAsync(int id);
+
+        Task<List<ChuyenAnhBase64KetQuaDto>> ChuyenAnhBase64CuAsync(bool chayThu);
     }
 }

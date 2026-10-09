@@ -1,5 +1,6 @@
 using System.Globalization;
 using DanhGiaAPI.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,6 +9,7 @@ namespace DanhGiaAPI.Controllers
     // Endpoint tổng hợp số liệu cho DashboardPageV2 (thay cho báo cáo Power
     // BI cũ) — tính sẵn ở SQL vì KetQuaDanhGia/DuLieuCom có hàng trăm nghìn
     // tới hàng triệu dòng, không thể tải thô về FE rồi tự group.
+    [Authorize(Policy = "QuanLyDashboard")]
     [Route("api/[controller]")]
     [ApiController]
     public class DashboardController : ControllerBase

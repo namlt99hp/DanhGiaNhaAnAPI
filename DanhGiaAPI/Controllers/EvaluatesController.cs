@@ -1,4 +1,5 @@
 ﻿using DanhGiaAPI.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OfficeOpenXml;
@@ -17,7 +18,9 @@ namespace DanhGiaAPI.Controllers
         {
             _context = context;
         }
-        // GET: api/<Evaluates>
+        // GET: api/<Evaluates> — tra cứu lịch sử khảo sát (LichSuKhaoSatPageV2),
+        // khác với POST bên dưới (kiosk khách chấm điểm, phải để public).
+        [Authorize(Policy = "QuanLyLichSuKhaoSat")]
         [HttpGet]
         public async Task<ActionResult<PagedResponse<KetQuaDanhGia>>> GetDatas([FromQuery] KetQuaFilterParameters filter)
         {
@@ -135,6 +138,7 @@ namespace DanhGiaAPI.Controllers
         public void Delete(int id)
         {
         }
+        [Authorize(Policy = "QuanLyLichSuKhaoSat")]
         [HttpGet("export-excel")]
         public IActionResult ExportExcel([FromQuery] KetQuaFilterParameters filter)
         {

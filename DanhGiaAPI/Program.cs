@@ -176,6 +176,8 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("QuanLyDanhMuc", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_DANH_MUC")));
     options.AddPolicy("QuanLyTieuChi", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_TIEU_CHI")));
     options.AddPolicy("QuanLyLuongKy", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_LUONG_KY")));
+    options.AddPolicy("QuanLyLichSuKhaoSat", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_LSKS")));
+    options.AddPolicy("QuanLyDashboard", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_DASHBOARD")));
 });
 
 builder.Services.AddControllers();

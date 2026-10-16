@@ -1,4 +1,5 @@
 using DanhGiaAPI.Common;
+using DanhGiaAPI.Jobs;
 using DanhGiaAPI.Models;
 using DanhGiaAPI.Repositories;
 using DanhGiaAPI.Repositories.Interfaces;
@@ -9,6 +10,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Quartz;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -41,6 +43,13 @@ builder.Services.AddCors(options =>
 
 
 // Đăng ký DbContext với Dependency Injection (DI)
+// EnableRetryOnFailure KHÔNG dùng ở đây: Phieu1-4Service + SoHieuService tự mở
+// transaction tay (_context.Database.BeginTransactionAsync()/UnitOfWork), mà
+// retrying execution strategy không cho user-initiated transaction trừ khi
+// bọc qua CreateExecutionStrategy() — bật lên sẽ vỡ các API đó (vd
+// InvalidOperationException ở POST /api/phieu4). Lỗi transient của job Quartz
+// đã được xử lý bằng try/catch trong TinhLaiKetQuaDanhGiaPhanBoJob thay vì
+// retry ở tầng DbContext.
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DbConnectionString")));
 
@@ -72,11 +81,13 @@ builder.Services.AddScoped<INhatKyChinhSuaRepository, NhatKyChinhSuaRepository>(
 builder.Services.AddScoped<IPhieu1KiemTraRepository, Phieu1KiemTraRepository>();
 builder.Services.AddScoped<IPhieu1ChiTietRepository, Phieu1ChiTietRepository>();
 builder.Services.AddScoped<IPhieu1KetLuanRepository, Phieu1KetLuanRepository>();
+builder.Services.AddScoped<IPhieu1ThuHoiRepository, Phieu1ThuHoiRepository>();
 builder.Services.AddScoped<IPhieu2DanhGiaRepository, Phieu2DanhGiaRepository>();
 builder.Services.AddScoped<IPhieu2TieuChiRepository, Phieu2TieuChiRepository>();
 builder.Services.AddScoped<IPhieu2KetQuaRepository, Phieu2KetQuaRepository>();
 builder.Services.AddScoped<IPhieu2YKienNhaThauRepository, Phieu2YKienNhaThauRepository>();
 builder.Services.AddScoped<IPhieu2NhaAnRepository, Phieu2NhaAnRepository>();
+builder.Services.AddScoped<IPhieu2ThuHoiRepository, Phieu2ThuHoiRepository>();
 builder.Services.AddScoped<IPhieu3BaoCaoRepository, Phieu3BaoCaoRepository>();
 builder.Services.AddScoped<IPhieu3Bang1DongRepository, Phieu3Bang1DongRepository>();
 builder.Services.AddScoped<IPhieu3Bang2DongRepository, Phieu3Bang2DongRepository>();
@@ -93,6 +104,8 @@ builder.Services.AddScoped<IPhieu3DoanDiaDiemRepository, Phieu3DoanDiaDiemReposi
 builder.Services.AddScoped<IPhieu4DoanRepository, Phieu4DoanRepository>();
 builder.Services.AddScoped<IPhieu4DoanDiaDiemRepository, Phieu4DoanDiaDiemRepository>();
 builder.Services.AddScoped<IBuaAnRepository, BuaAnRepository>();
+builder.Services.AddScoped<IKetQuaDanhGiaPhanBoRepository, KetQuaDanhGiaPhanBoRepository>();
+builder.Services.AddScoped<IKetQuaDanhGiaLoaiTruRepository, KetQuaDanhGiaLoaiTruRepository>();
 
 // Đăng ký Service cho module đăng nhập/quản lý tài khoản/danh mục
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -139,6 +152,21 @@ builder.Services.AddScoped<IPhieu3Service, Phieu3Service>();
 // (Giai đoạn 6 — xem modules/Phieu4_TongHopPhanBo.md)
 builder.Services.AddScoped<IPhieu4Service, Phieu4Service>();
 
+// Phân bổ lại KetQuaDanhGia (hệ kiosk) cho khớp DuLieuCom.Com_ThucTe — nguồn
+// "Số lượt đánh giá mức 1-5" của Phiếu 3/Phiếu 4. Trước đây gọi bởi cron
+// ngoài; nay chạy nội bộ qua Quartz (đăng ký job ngay dưới + lên lịch sau
+// builder.Build(), xem Jobs/TinhLaiKetQuaDanhGiaPhanBoJob.cs +
+// modules/KetQuaDanhGiaPhanBo.md). Endpoint POST
+// /api/KetQuaDanhGiaPhanBo/tinh-lai vẫn giữ để gọi tay/backfill khi cần.
+builder.Services.AddScoped<IKetQuaDanhGiaPhanBoService, KetQuaDanhGiaPhanBoService>();
+
+builder.Services.AddQuartz(q => q.UseMicrosoftDependencyInjectionJobFactory());
+builder.Services.AddQuartzHostedService(opt => opt.WaitForJobsToComplete = true);
+
+// Đánh dấu (Ngày, Bữa ăn, Địa điểm) máy kiosk hỏng — loại trừ khỏi "Lượt
+// đánh giá" của Phiếu 3/4 (xem modules/KetQuaDanhGiaPhanBo.md).
+builder.Services.AddScoped<IKetQuaDanhGiaLoaiTruService, KetQuaDanhGiaLoaiTruService>();
+
 // Xác thực JWT (module Đăng nhập — xem 02. Phantich/modules/DangNhap.md)
 var jwtSection = builder.Configuration.GetSection("Jwt");
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -178,6 +206,12 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("QuanLyLuongKy", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_LUONG_KY")));
     options.AddPolicy("QuanLyLichSuKhaoSat", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_LSKS")));
     options.AddPolicy("QuanLyDashboard", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_DASHBOARD")));
+    // Tách riêng khỏi QuanLyDanhMuc/QuanLyLichSuKhaoSat — trước đây
+    // KetQuaDanhGiaLoaiTruController/KetQuaDanhGiaPhanBoController ăn ké 2
+    // policy đó nên không có quyền RIÊNG để gán cho vai trò (xem
+    // modules/VaiTro.md mục 8, migration_quyen_ket_qua_danh_gia.sql).
+    options.AddPolicy("QuanLyLoaiTruThietBi", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_LOAI_TRU_THIET_BI")));
+    options.AddPolicy("QuanLyPhanBoDanhGia", p => p.RequireAssertion(ctx => CoQuyen(ctx, "QUAN_LY_PHAN_BO_DANH_GIA")));
 });
 
 builder.Services.AddControllers();
@@ -240,5 +274,24 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Lên lịch TinhLaiKetQuaDanhGiaPhanBoJob — 1 trigger DUY NHẤT, cố định mỗi 6h
+// (giờ chạy lấy từ appsettings "KetQuaDanhGiaPhanBoCron"); mỗi lần nổ, job tự
+// xác định và CHỈ tính cho bữa ăn gần nhất đã kết thúc (xem
+// Jobs/TinhLaiKetQuaDanhGiaPhanBoJob.cs). Đổi giờ cron trong appsettings cần
+// restart app để áp dụng.
+{
+    var cron = app.Configuration["KetQuaDanhGiaPhanBoCron"]!;
+    var scheduler = await app.Services.GetRequiredService<ISchedulerFactory>().GetScheduler();
+
+    var job = JobBuilder.Create<TinhLaiKetQuaDanhGiaPhanBoJob>()
+        .WithIdentity("TinhLaiKetQuaDanhGiaPhanBo")
+        .Build();
+    var trigger = TriggerBuilder.Create()
+        .WithIdentity("TinhLaiKetQuaDanhGiaPhanBo-trigger")
+        .WithCronSchedule(cron)
+        .Build();
+    await scheduler.ScheduleJob(job, trigger);
+}
 
 app.Run();

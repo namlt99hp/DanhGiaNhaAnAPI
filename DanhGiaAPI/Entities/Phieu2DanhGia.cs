@@ -27,5 +27,10 @@ namespace DanhGiaAPI.Entities
         public int? NguoiTao { get; set; }
         public string TrangThai { get; set; } = "NHAP";
         public DateTime NgayTao { get; set; } = DateTime.Now;
+
+        // Số lần phiếu này đã bị thu hồi (CHO_KY/DA_DUYET -> NHAP để sửa lại)
+        // — tăng mỗi lần Phieu2Service.ThuHoiAsync chạy. Chi tiết từng lần
+        // (ai, khi nào, lý do) nằm ở Phieu2_ThuHoi, xem Entities/Phieu2ThuHoi.cs.
+        public int SoLanThuHoi { get; set; } = 0;
     }
 }

@@ -43,6 +43,7 @@ namespace DanhGiaAPI.Services
                 Ten = request.Ten.Trim(),
                 NgayBatDauHd = request.NgayBatDauHd,
                 NgayKetThucHd = request.NgayKetThucHd,
+                SoHopDong = request.SoHopDong?.Trim(),
                 TrangThai = request.TrangThai,
                 NgayTao = DateTime.Now
             };
@@ -65,6 +66,7 @@ namespace DanhGiaAPI.Services
             nhaThau.Ten = request.Ten.Trim();
             nhaThau.NgayBatDauHd = request.NgayBatDauHd;
             nhaThau.NgayKetThucHd = request.NgayKetThucHd;
+            nhaThau.SoHopDong = request.SoHopDong?.Trim();
             nhaThau.TrangThai = request.TrangThai;
             await _unitOfWork.SaveChangesAsync();
             return nhaThau;

@@ -14,6 +14,9 @@ namespace DanhGiaAPI.DTOs.NhaThau
 
         public DateTime? NgayBatDauHd { get; set; }
         public DateTime? NgayKetThucHd { get; set; }
+
+        [MaxLength(100)]
+        public string? SoHopDong { get; set; }
         public string TrangThai { get; set; } = "HOAT_DONG";
     }
 }

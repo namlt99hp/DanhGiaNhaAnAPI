@@ -15,6 +15,7 @@ namespace DanhGiaAPI.DTOs.Phieu1
         public int? NguoiTao { get; set; }
         public string TrangThai { get; set; } = "NHAP";
         public DateTime NgayTao { get; set; }
+        public int SoLanThuHoi { get; set; }
 
         // Họ tên người ký ĐÃ DUYỆT (lượt ký mới nhất) — phân biệt theo tài
         // khoản ký có NhaThauId hay không, KHÔNG theo BuocThuTu (xem

@@ -44,6 +44,7 @@ namespace DanhGiaAPI.Services
         private readonly ITepDinhKemService           _tepDinhKemService;
         private readonly IChuKyPhieuService           _chuKyPhieuService;
         private readonly IChuKyPhieuRepository        _chuKyPhieuRepository;
+        private readonly IPhieu2ThuHoiRepository      _phieu2ThuHoiRepository;
         private readonly INguoiDungRepository         _nguoiDungRepository;
         private readonly IUnitOfWork                  _unitOfWork;
 
@@ -64,6 +65,7 @@ namespace DanhGiaAPI.Services
             ITepDinhKemService           tepDinhKemService,
             IChuKyPhieuService           chuKyPhieuService,
             IChuKyPhieuRepository        chuKyPhieuRepository,
+            IPhieu2ThuHoiRepository      phieu2ThuHoiRepository,
             INguoiDungRepository         nguoiDungRepository,
             IUnitOfWork                  unitOfWork)
         {
@@ -83,6 +85,7 @@ namespace DanhGiaAPI.Services
             _tepDinhKemService       = tepDinhKemService;
             _chuKyPhieuService       = chuKyPhieuService;
             _chuKyPhieuRepository    = chuKyPhieuRepository;
+            _phieu2ThuHoiRepository  = phieu2ThuHoiRepository;
             _nguoiDungRepository     = nguoiDungRepository;
             _unitOfWork              = unitOfWork;
         }
@@ -223,6 +226,7 @@ namespace DanhGiaAPI.Services
                 NguoiTao = p.NguoiTao,
                 TrangThai = p.TrangThai,
                 NgayTao = p.NgayTao,
+                SoLanThuHoi = p.SoLanThuHoi,
             }).ToList();
             await GanTenNguoiDaKyAsync(items);
 
@@ -534,6 +538,80 @@ namespace DanhGiaAPI.Services
                 await _unitOfWork.SaveChangesAsync();
             }
             return phieu;
+        }
+
+        // ============================================================
+        // THU HỒI
+        // ============================================================
+
+        // Thu hồi phiếu đang CHO_KY/DA_DUYET về NHAP để sửa lại — xem
+        // Phieu1Service.ThuHoiAsync (cùng thiết kế). Phiếu 2 không có
+        // PhongBanId trên entity (KiemTraQuyenDanhGiaAsync không hard-code
+        // theo phòng ban cho PHIEU2) nên quyền thu hồi chỉ cần đúng quyền
+        // "Đánh giá/nhập liệu" PHIEU2 (hoặc Admin), không có ràng buộc thêm
+        // theo phòng ban như Phiếu 1.
+        public async Task<Phieu2DanhGia> ThuHoiAsync(int id, int nguoiThuHoiId, bool laAdmin, string lyDo)
+        {
+            if (string.IsNullOrWhiteSpace(lyDo))
+                throw new ApiException("Vui lòng nhập lý do thu hồi");
+
+            await KiemTraQuyenDanhGiaAsync(nguoiThuHoiId, laAdmin);
+
+            var phieu = await _phieu2Repository.GetByIdAsync(id)
+                ?? throw new ApiException("Không tìm thấy phiếu đánh giá", StatusCodes.Status404NotFound);
+
+            if (phieu.TrangThai != "CHO_KY" && phieu.TrangThai != "DA_DUYET")
+                throw new ApiException("Chỉ có thể thu hồi phiếu đang ở trạng thái Chờ ký hoặc Đã duyệt");
+
+            var phienBanTiepTheo = (await _phieu2ThuHoiRepository.FindAsync(x => x.PhieuId == id)).Count + 1;
+
+            await _phieu2ThuHoiRepository.AddAsync(new Phieu2ThuHoi
+            {
+                PhieuId = id,
+                PhienBan = phienBanTiepTheo,
+                TrangThaiTruocKhiThuHoi = phieu.TrangThai,
+                NguoiThuHoiId = nguoiThuHoiId,
+                NgayThuHoi = DateTime.Now,
+                LyDoThuHoi = lyDo.Trim(),
+            });
+
+            // KHÔNG đụng ChuKyPhieu — xem Phieu1Service.ThuHoiAsync. SoHieu
+            // (nếu đã cấp) được GIỮ NGUYÊN.
+            phieu.TrangThai = "NHAP";
+            phieu.SoLanThuHoi += 1;
+            _phieu2Repository.Update(phieu);
+            await _unitOfWork.SaveChangesAsync();
+
+            return phieu;
+        }
+
+        public async Task<List<Phieu2ThuHoiDto>> LichSuThuHoiAsync(int id, int? nhaThauCuaNguoiGoi, int? nguoiDungId, bool laAdmin)
+        {
+            await KiemTraQuyenXemAsync(nguoiDungId, laAdmin, nhaThauCuaNguoiGoi);
+
+            var phieu = await _phieu2Repository.GetByIdAsync(id)
+                ?? throw new ApiException("Không tìm thấy phiếu đánh giá", StatusCodes.Status404NotFound);
+            if (nhaThauCuaNguoiGoi.HasValue && phieu.NhaThauId != nhaThauCuaNguoiGoi)
+                throw new ApiException("Bạn không có quyền xem phiếu của nhà thầu khác", StatusCodes.Status403Forbidden);
+
+            var lichSu = (await _phieu2ThuHoiRepository.FindAsync(x => x.PhieuId == id))
+                .OrderBy(x => x.PhienBan).ToList();
+            if (lichSu.Count == 0) return new List<Phieu2ThuHoiDto>();
+
+            var nguoiIds = lichSu.Select(x => x.NguoiThuHoiId).Distinct().ToList();
+            var nguoiDungMap = (await _nguoiDungRepository.FindAsync(x => nguoiIds.Contains(x.Id)))
+                .ToDictionary(x => x.Id, x => x.HoTen);
+
+            return lichSu.Select(x => new Phieu2ThuHoiDto
+            {
+                Id = x.Id,
+                PhienBan = x.PhienBan,
+                TrangThaiTruocKhiThuHoi = x.TrangThaiTruocKhiThuHoi,
+                NguoiThuHoiId = x.NguoiThuHoiId,
+                NguoiThuHoiHoTen = nguoiDungMap.GetValueOrDefault(x.NguoiThuHoiId),
+                NgayThuHoi = x.NgayThuHoi,
+                LyDoThuHoi = x.LyDoThuHoi,
+            }).ToList();
         }
 
         // ============================================================

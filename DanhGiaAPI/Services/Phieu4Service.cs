@@ -67,7 +67,8 @@ namespace DanhGiaAPI.Services
         private readonly IPhieu2TieuChiRepository  _phieu2TieuChiRepository;
         private readonly IPhieu1KiemTraRepository  _phieu1Repository;
         private readonly IPhieu1KetLuanRepository  _phieu1KetLuanRepository;
-        private readonly IKetQuaDanhGiaRepository  _ketQuaDanhGiaRepository;
+        private readonly IKetQuaDanhGiaPhanBoRepository _ketQuaDanhGiaPhanBoRepository;
+        private readonly IKetQuaDanhGiaLoaiTruRepository _ketQuaDanhGiaLoaiTruRepository;
         private readonly IDuLieuComRepository      _duLieuComRepository;
         private readonly INhaThauRepository        _nhaThauRepository;
         private readonly IDiaDiemNhaAnRepository   _diaDiemNhaAnRepository;
@@ -114,7 +115,8 @@ namespace DanhGiaAPI.Services
             IPhieu2TieuChiRepository phieu2TieuChiRepository,
             IPhieu1KiemTraRepository phieu1Repository,
             IPhieu1KetLuanRepository phieu1KetLuanRepository,
-            IKetQuaDanhGiaRepository ketQuaDanhGiaRepository,
+            IKetQuaDanhGiaPhanBoRepository ketQuaDanhGiaPhanBoRepository,
+            IKetQuaDanhGiaLoaiTruRepository ketQuaDanhGiaLoaiTruRepository,
             IDuLieuComRepository duLieuComRepository,
             INhaThauRepository nhaThauRepository,
             IDiaDiemNhaAnRepository diaDiemNhaAnRepository,
@@ -139,7 +141,8 @@ namespace DanhGiaAPI.Services
             _phieu2TieuChiRepository = phieu2TieuChiRepository;
             _phieu1Repository       = phieu1Repository;
             _phieu1KetLuanRepository = phieu1KetLuanRepository;
-            _ketQuaDanhGiaRepository = ketQuaDanhGiaRepository;
+            _ketQuaDanhGiaPhanBoRepository = ketQuaDanhGiaPhanBoRepository;
+            _ketQuaDanhGiaLoaiTruRepository = ketQuaDanhGiaLoaiTruRepository;
             _duLieuComRepository    = duLieuComRepository;
             _nhaThauRepository      = nhaThauRepository;
             _diaDiemNhaAnRepository = diaDiemNhaAnRepository;
@@ -890,15 +893,24 @@ namespace DanhGiaAPI.Services
         }
 
         // ============================================================
-        // TÍNH SỐ LƯỢT ĐÁNH GIÁ CBNV (MỨC 1-5) TỪ KETQUADANHGIA (HỆ KIOSK CŨ)
+        // TÍNH SỐ LƯỢT ĐÁNH GIÁ CBNV (MỨC 1-5) TỪ KETQUADANHGIA_PHANBO
         // ============================================================
         //
-        // ID_BuaAn đã được gán đáng tin cậy ngay lúc kiosk ghi bản ghi (xem
-        // EvaluatesController.Post — tra KhungGioDanhGia theo giờ hiện tại;
-        // nếu giờ nộp nằm ngoài cả 4 khung giờ thì bản ghi KHÔNG được lưu vào
-        // DB) — nên đọc thẳng ID_BuaAn, KHÔNG cần re-derive qua KhungGioDanhGia
-        // ở đây. Cộng theo đúng biên bữa ăn của từng đoạn/địa điểm đã khai báo
-        // cho cột nhà thầu này (thay thế hoàn toàn suy luận "địa điểm rõ ràng" cũ).
+        // Đổi nguồn 2026-10-13 (xem 02. Phantich/modules/KetQuaDanhGiaPhanBo.md,
+        // cùng thay đổi với Phieu3Service.TinhSoLuotCbnvTheoMucTuDoanAsync):
+        // đọc từ KetQuaDanhGiaPhanBo (đã phân bổ lại cho khớp
+        // DuLieuCom.Com_ThucTe, tính bởi KetQuaDanhGiaPhanBoService theo cron
+        // ngoài) THAY CHO đếm trực tiếp KetQuaDanhGia thô — vì 1 CBNV chỉ
+        // được đánh giá tối đa 1 lần/bữa, số đánh giá thô có thể bị trùng
+        // (lỗi kiosk/mạng) vượt quá số suất ăn thực tế. Cộng theo đúng biên
+        // bữa ăn của từng đoạn/địa điểm đã khai báo cho cột nhà thầu này,
+        // cùng cách lọc như cũ.
+        //
+        // Thêm 2026-10-13: bỏ qua các (Ngày, Bữa ăn, Địa điểm) đã bị đánh dấu
+        // KetQuaDanhGiaLoaiTru (máy kiosk hỏng, xem mục "Loại trừ do lỗi
+        // thiết bị" cùng tài liệu trên) — CHỈ loại trừ khỏi lượt đánh giá ở
+        // đây, KHÔNG đụng TinhTongSuatAnTuDoanAsync (Tổng suất ăn vẫn tính
+        // bình thường, xác nhận nghiệp vụ).
         private async Task<decimal[]> TinhSoLuotCbnvTheoMucTuDoanAsync(List<DoanCalc> doanList)
         {
             var soLuot = new decimal[6]; // [0] không dùng, [1..5]
@@ -908,22 +920,32 @@ namespace DanhGiaAPI.Services
 
             var tuNgayNhoNhat = doanList.Min(d => d.TuNgay);
             var denNgayLonNhat = doanList.Max(d => d.DenNgay);
-            var ketQua = await _ketQuaDanhGiaRepository.FindAsync(x =>
-                diaDiemIds.Contains(x.DiaDiem_ID) &&
-                x.ThoiGianDanhGia.Date >= tuNgayNhoNhat && x.ThoiGianDanhGia.Date <= denNgayLonNhat);
+            var phanBo = await _ketQuaDanhGiaPhanBoRepository.FindAsync(x =>
+                diaDiemIds.Contains(x.DiaDiemNhaAnId) &&
+                x.Ngay >= tuNgayNhoNhat && x.Ngay <= denNgayLonNhat);
+            var loaiTru = (await _ketQuaDanhGiaLoaiTruRepository.FindAsync(x =>
+                    diaDiemIds.Contains(x.DiaDiemNhaAnId) &&
+                    x.Ngay >= tuNgayNhoNhat && x.Ngay <= denNgayLonNhat))
+                .Select(x => (x.Ngay, x.ID_BuaAn, x.DiaDiemNhaAnId))
+                .ToHashSet();
             var buaAnThuTu = await LayBuaAnThuTuAsync();
 
             foreach (var doan in doanList)
             {
                 if (doan.DiaDiemIds.Count == 0) continue;
-                var rowsCuaDoan = ketQua.Where(r =>
-                    doan.DiaDiemIds.Contains(r.DiaDiem_ID) && r.ThoiGianDanhGia.Date >= doan.TuNgay && r.ThoiGianDanhGia.Date <= doan.DenNgay);
+                var rowsCuaDoan = phanBo.Where(r =>
+                    doan.DiaDiemIds.Contains(r.DiaDiemNhaAnId) && r.Ngay >= doan.TuNgay && r.Ngay <= doan.DenNgay);
                 foreach (var row in rowsCuaDoan)
                 {
-                    if (row.DiemDanhGia is < 1 or > 5) continue;
-                    if (!row.ID_BuaAn.HasValue || !buaAnThuTu.TryGetValue(row.ID_BuaAn.Value, out var thuTu)) continue; // phòng thủ, không nên xảy ra
-                    var (min, max) = BienBuaAnTrongNgay(row.ThoiGianDanhGia.Date, doan);
-                    if (thuTu >= min && thuTu <= max) soLuot[row.DiemDanhGia]++;
+                    if (loaiTru.Contains((row.Ngay, row.ID_BuaAn, row.DiaDiemNhaAnId))) continue; // máy kiosk hỏng
+                    if (!buaAnThuTu.TryGetValue(row.ID_BuaAn, out var thuTu)) continue; // phòng thủ, không nên xảy ra
+                    var (min, max) = BienBuaAnTrongNgay(row.Ngay, doan);
+                    if (thuTu < min || thuTu > max) continue;
+                    soLuot[1] += row.Diem1;
+                    soLuot[2] += row.Diem2;
+                    soLuot[3] += row.Diem3;
+                    soLuot[4] += row.Diem4;
+                    soLuot[5] += row.Diem5;
                 }
             }
             return soLuot;

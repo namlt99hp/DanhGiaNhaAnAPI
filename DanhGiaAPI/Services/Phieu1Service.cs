@@ -25,6 +25,7 @@ namespace DanhGiaAPI.Services
         private readonly ITepDinhKemService _tepDinhKemService;
         private readonly IChuKyPhieuService _chuKyPhieuService;
         private readonly IChuKyPhieuRepository _chuKyPhieuRepository;
+        private readonly IPhieu1ThuHoiRepository _phieu1ThuHoiRepository;
         private readonly INguoiDungRepository _nguoiDungRepository;
         private readonly IUnitOfWork _unitOfWork;
 
@@ -42,6 +43,7 @@ namespace DanhGiaAPI.Services
             ITepDinhKemService tepDinhKemService,
             IChuKyPhieuService chuKyPhieuService,
             IChuKyPhieuRepository chuKyPhieuRepository,
+            IPhieu1ThuHoiRepository phieu1ThuHoiRepository,
             INguoiDungRepository nguoiDungRepository,
             IUnitOfWork unitOfWork)
         {
@@ -58,6 +60,7 @@ namespace DanhGiaAPI.Services
             _tepDinhKemService = tepDinhKemService;
             _chuKyPhieuService = chuKyPhieuService;
             _chuKyPhieuRepository = chuKyPhieuRepository;
+            _phieu1ThuHoiRepository = phieu1ThuHoiRepository;
             _nguoiDungRepository = nguoiDungRepository;
             _unitOfWork = unitOfWork;
         }
@@ -251,6 +254,7 @@ namespace DanhGiaAPI.Services
                 NguoiTao = p.NguoiTao,
                 TrangThai = p.TrangThai,
                 NgayTao = p.NgayTao,
+                SoLanThuHoi = p.SoLanThuHoi,
             }).ToList();
             await GanTenNguoiDaKyAsync(items);
 
@@ -571,6 +575,84 @@ namespace DanhGiaAPI.Services
             }
 
             return phieu;
+        }
+
+        // Thu hồi phiếu đang CHO_KY/DA_DUYET về NHAP để sửa lại — xem
+        // IPhieu1Service.ThuHoiAsync. Quyền giống hệt điều kiện tạo/sửa
+        // (KiemTraQuyenDanhGiaAsync) CỘNG thêm ràng buộc đúng phòng ban đã lập
+        // phiếu (giống luật xem chi tiết ở LayChiTietAsync) — Admin bypass cả 2.
+        public async Task<Phieu1KiemTra> ThuHoiAsync(int id, int nguoiThuHoiId, bool laAdmin, int? phongBanCuaNguoiGoi, string lyDo)
+        {
+            if (string.IsNullOrWhiteSpace(lyDo))
+                throw new ApiException("Vui lòng nhập lý do thu hồi");
+
+            await KiemTraQuyenDanhGiaAsync(nguoiThuHoiId, laAdmin);
+
+            var phieu = await _phieu1Repository.GetByIdAsync(id)
+                ?? throw new ApiException("Không tìm thấy phiếu kiểm tra", StatusCodes.Status404NotFound);
+
+            if (!laAdmin && phieu.PhongBanId != phongBanCuaNguoiGoi)
+                throw new ApiException("Bạn không có quyền thu hồi phiếu của phòng ban khác", StatusCodes.Status403Forbidden);
+
+            if (phieu.TrangThai != "CHO_KY" && phieu.TrangThai != "DA_DUYET")
+                throw new ApiException("Chỉ có thể thu hồi phiếu đang ở trạng thái Chờ ký hoặc Đã duyệt");
+
+            var phienBanTiepTheo = (await _phieu1ThuHoiRepository.FindAsync(x => x.PhieuId == id)).Count + 1;
+
+            await _phieu1ThuHoiRepository.AddAsync(new Phieu1ThuHoi
+            {
+                PhieuId = id,
+                PhienBan = phienBanTiepTheo,
+                TrangThaiTruocKhiThuHoi = phieu.TrangThai,
+                NguoiThuHoiId = nguoiThuHoiId,
+                NgayThuHoi = DateTime.Now,
+                LyDoThuHoi = lyDo.Trim(),
+            });
+
+            // KHÔNG đụng ChuKyPhieu — lượt ký (LuotKy) cũ giữ nguyên làm lịch
+            // sử. Lần "Gửi ký" lại sau khi sửa tự tạo LuotKy MỚI (xem
+            // ChuKyPhieuService.KhoiTaoLuongKyAsync), tương đương ký lại từ
+            // đầu, kể cả khi thu hồi từ DA_DUYET (đã ký xong toàn bộ). SoHieu
+            // (nếu đã cấp) được GIỮ NGUYÊN — CapSoHieuNeuChuaCoAsync chỉ cấp
+            // khi còn trống, xác nhận nghiệp vụ.
+            phieu.TrangThai = "NHAP";
+            phieu.SoLanThuHoi += 1;
+            _phieu1Repository.Update(phieu);
+            await _unitOfWork.SaveChangesAsync();
+
+            return phieu;
+        }
+
+        public async Task<List<Phieu1ThuHoiDto>> LichSuThuHoiAsync(int id, int? nhaThauCuaNguoiGoi, int? nguoiDungId, bool laAdmin, int? phongBanCuaNguoiGoi)
+        {
+            await KiemTraQuyenXemAsync(nguoiDungId, laAdmin, nhaThauCuaNguoiGoi);
+
+            var phieu = await _phieu1Repository.GetByIdAsync(id)
+                ?? throw new ApiException("Không tìm thấy phiếu kiểm tra", StatusCodes.Status404NotFound);
+
+            if (nhaThauCuaNguoiGoi.HasValue && phieu.NhaThauId != nhaThauCuaNguoiGoi)
+                throw new ApiException("Bạn không có quyền xem phiếu của nhà thầu khác", StatusCodes.Status403Forbidden);
+            if (!laAdmin && !nhaThauCuaNguoiGoi.HasValue && phieu.TrangThai != "DA_DUYET" && phieu.PhongBanId != phongBanCuaNguoiGoi)
+                throw new ApiException("Bạn không có quyền xem phiếu của phòng ban khác", StatusCodes.Status403Forbidden);
+
+            var lichSu = (await _phieu1ThuHoiRepository.FindAsync(x => x.PhieuId == id))
+                .OrderBy(x => x.PhienBan).ToList();
+            if (lichSu.Count == 0) return new List<Phieu1ThuHoiDto>();
+
+            var nguoiIds = lichSu.Select(x => x.NguoiThuHoiId).Distinct().ToList();
+            var nguoiDungMap = (await _nguoiDungRepository.FindAsync(x => nguoiIds.Contains(x.Id)))
+                .ToDictionary(x => x.Id, x => x.HoTen);
+
+            return lichSu.Select(x => new Phieu1ThuHoiDto
+            {
+                Id = x.Id,
+                PhienBan = x.PhienBan,
+                TrangThaiTruocKhiThuHoi = x.TrangThaiTruocKhiThuHoi,
+                NguoiThuHoiId = x.NguoiThuHoiId,
+                NguoiThuHoiHoTen = nguoiDungMap.GetValueOrDefault(x.NguoiThuHoiId),
+                NgayThuHoi = x.NgayThuHoi,
+                LyDoThuHoi = x.LyDoThuHoi,
+            }).ToList();
         }
 
         // Quy ước đánh số Phiếu 1 (Phiếu kiểm tra VSATTP): {seq:003}/{năm}/

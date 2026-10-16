@@ -1,4 +1,5 @@
 using DanhGiaAPI.Common;
+using DanhGiaAPI.DTOs.Common;
 using DanhGiaAPI.DTOs.Phieu2;
 using DanhGiaAPI.Extensions;
 using DanhGiaAPI.Services.Interfaces;
@@ -109,6 +110,21 @@ namespace DanhGiaAPI.Controllers
         public async Task<IActionResult> PhanHoiYKienNhaThau(int id, [FromBody] Phieu2YKienNhaThauRequest request)
         {
             return Ok(await _phieu2Service.PhanHoiYKienNhaThauAsync(id, request));
+        }
+
+        // POST api/phieu2/5/thu-hoi — CHO_KY/DA_DUYET -> NHAP, ghi lịch sử
+        // thu hồi — xem Phieu1Controller.ThuHoi
+        [HttpPost("{id}/thu-hoi")]
+        public async Task<IActionResult> ThuHoi(int id, [FromBody] ThuHoiPhieuRequest request)
+        {
+            return Ok(await _phieu2Service.ThuHoiAsync(id, User.GetNguoiDungId(), User.GetLaAdmin(), request.LyDo));
+        }
+
+        // GET api/phieu2/5/lich-su-thu-hoi
+        [HttpGet("{id}/lich-su-thu-hoi")]
+        public async Task<IActionResult> LichSuThuHoi(int id)
+        {
+            return Ok(await _phieu2Service.LichSuThuHoiAsync(id, User.GetNhaThauId(), User.GetNguoiDungId(), User.GetLaAdmin()));
         }
     }
 }

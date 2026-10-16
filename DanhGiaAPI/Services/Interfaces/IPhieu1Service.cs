@@ -38,6 +38,19 @@ namespace DanhGiaAPI.Services.Interfaces
         // chung /api/chu-ky-phieu/{id}/ky|tu-choi (xem LuongTrinhKy.md).
         Task<Phieu1KiemTra> DongBoTrangThaiAsync(int id);
 
+        // Thu hồi phiếu đang CHO_KY/DA_DUYET về lại NHAP để sửa (VD người đánh
+        // giá phát hiện sai sót sau khi đã gửi ký) — ghi 1 dòng lịch sử
+        // (Phieu1_ThuHoi, kèm PhienBan tăng dần = "version thu hồi") để truy
+        // vết AI thu hồi, khi nào, lý do gì. KHÔNG đụng ChuKyPhieu — thu hồi
+        // từ DA_DUYET rồi "Gửi ký" lại sẽ tự tạo LuotKy mới (ký lại từ đầu),
+        // xem Phieu1Service.ThuHoiAsync. Quyền: Admin hoặc đúng phòng ban đã
+        // lập phiếu + có quyền "Đánh giá/nhập liệu" PHIEU1 (giống điều kiện
+        // Sửa/Tạo hiện tại).
+        Task<Phieu1KiemTra> ThuHoiAsync(int id, int nguoiThuHoiId, bool laAdmin, int? phongBanCuaNguoiGoi, string lyDo);
+
+        // Lịch sử các lần thu hồi — cùng luật xem với ChiTietAsync.
+        Task<List<Phieu1ThuHoiDto>> LichSuThuHoiAsync(int id, int? nhaThauCuaNguoiGoi, int? nguoiDungId, bool laAdmin, int? phongBanCuaNguoiGoi);
+
         Task<List<ChuyenAnhBase64KetQuaDto>> ChuyenAnhBase64CuAsync(bool chayThu);
     }
 }

@@ -1,4 +1,5 @@
 using DanhGiaAPI.Common;
+using DanhGiaAPI.DTOs.Common;
 using DanhGiaAPI.DTOs.Phieu1;
 using DanhGiaAPI.Extensions;
 using DanhGiaAPI.Services.Interfaces;
@@ -95,6 +96,23 @@ namespace DanhGiaAPI.Controllers
         public async Task<IActionResult> DongBoTrangThai(int id)
         {
             return Ok(await _phieu1Service.DongBoTrangThaiAsync(id));
+        }
+
+        // POST api/phieu1/5/thu-hoi — CHO_KY/DA_DUYET -> NHAP, ghi lịch sử
+        // thu hồi (ai, khi nào, lý do, "version" thu hồi). Admin hoặc đúng
+        // phòng ban đã lập phiếu + có quyền "Đánh giá/nhập liệu" PHIEU1.
+        [HttpPost("{id}/thu-hoi")]
+        public async Task<IActionResult> ThuHoi(int id, [FromBody] ThuHoiPhieuRequest request)
+        {
+            return Ok(await _phieu1Service.ThuHoiAsync(id, User.GetNguoiDungId(), User.GetLaAdmin(), User.GetPhongBanId(), request.LyDo));
+        }
+
+        // GET api/phieu1/5/lich-su-thu-hoi — danh sách các lần thu hồi, cùng
+        // luật xem với GET api/phieu1/5
+        [HttpGet("{id}/lich-su-thu-hoi")]
+        public async Task<IActionResult> LichSuThuHoi(int id)
+        {
+            return Ok(await _phieu1Service.LichSuThuHoiAsync(id, User.GetNhaThauId(), User.GetNguoiDungId(), User.GetLaAdmin(), User.GetPhongBanId()));
         }
 
         // POST api/phieu1/chuyen-anh-base64?chayThu=true — CHỈ Admin. Chuyển 1

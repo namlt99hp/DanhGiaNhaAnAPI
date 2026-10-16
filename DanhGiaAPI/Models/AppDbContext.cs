@@ -15,6 +15,12 @@ namespace DanhGiaAPI.Models
         public DbSet<DuLieuCom> DuLieuCom { get; set; }
         public DbSet<BuaAn> BuaAn { get; set; }
         public DbSet<KhungGioDanhGia> KhungGioDanhGia { get; set; }
+        // KetQuaDanhGia đã phân bổ lại cho khớp DuLieuCom.Com_ThucTe — xem
+        // 02. Phantich/modules/KetQuaDanhGiaPhanBo.md.
+        public DbSet<KetQuaDanhGiaPhanBo> KetQuaDanhGiaPhanBo { get; set; }
+        // Đánh dấu (Ngày, Bữa ăn, Địa điểm) máy kiosk hỏng — loại trừ khỏi
+        // "Lượt đánh giá" của Phiếu 3/4, xem cùng tài liệu trên.
+        public DbSet<KetQuaDanhGiaLoaiTru> KetQuaDanhGiaLoaiTru { get; set; }
         //public DbSet<LyDo> LyDo { get; set; }
 
         // Module đánh giá bếp ăn (mới) — xem 02. Phantich/schema_module_danh_gia_nha_an.sql
@@ -48,6 +54,9 @@ namespace DanhGiaAPI.Models
         public DbSet<Phieu1KiemTra> Phieu1KiemTra { get; set; }
         public DbSet<Phieu1ChiTiet> Phieu1ChiTiet { get; set; }
         public DbSet<Phieu1KetLuan> Phieu1KetLuan { get; set; }
+        // Lịch sử thu hồi (CHO_KY/DA_DUYET -> NHAP để sửa lại) — xem
+        // Entities/Phieu1ThuHoi.cs.
+        public DbSet<Phieu1ThuHoi> Phieu1ThuHoi { get; set; }
 
         // Giai đoạn 4 — Phiếu (2): Đánh giá chất lượng dịch vụ suất ăn (xem
         // 02. Phantich/modules/Phieu2_DanhGiaSuatAn.md)
@@ -58,6 +67,8 @@ namespace DanhGiaAPI.Models
         // Liên kết N-N Phiếu 2 <-> Nhà ăn — 1 phiếu có thể gộp nhiều nhà ăn
         // (xem Entities/Phieu2NhaAn.cs).
         public DbSet<Phieu2NhaAn> Phieu2NhaAn { get; set; }
+        // Lịch sử thu hồi — xem Entities/Phieu2ThuHoi.cs.
+        public DbSet<Phieu2ThuHoi> Phieu2ThuHoi { get; set; }
 
         // Giai đoạn 5 — Phiếu (3): Báo cáo chất lượng dịch vụ suất ăn theo tháng (xem
         // 02. Phantich/modules/Phieu3_BaoCaoThang.md)
@@ -98,12 +109,14 @@ namespace DanhGiaAPI.Models
             modelBuilder.Entity<Phieu1KiemTra>().ToTable("Phieu1_KiemTra");
             modelBuilder.Entity<Phieu1ChiTiet>().ToTable("Phieu1_ChiTiet");
             modelBuilder.Entity<Phieu1KetLuan>().ToTable("Phieu1_KetLuan");
+            modelBuilder.Entity<Phieu1ThuHoi>().ToTable("Phieu1_ThuHoi");
 
             modelBuilder.Entity<Phieu2DanhGia>().ToTable("Phieu2_DanhGia");
             modelBuilder.Entity<Phieu2TieuChi>().ToTable("Phieu2_TieuChi");
             modelBuilder.Entity<Phieu2KetQua>().ToTable("Phieu2_KetQua");
             modelBuilder.Entity<Phieu2YKienNhaThau>().ToTable("Phieu2_YKienNhaThau");
             modelBuilder.Entity<Phieu2NhaAn>().ToTable("Phieu2_NhaAn");
+            modelBuilder.Entity<Phieu2ThuHoi>().ToTable("Phieu2_ThuHoi");
 
             modelBuilder.Entity<Phieu3BaoCao>().ToTable("Phieu3_BaoCao");
             modelBuilder.Entity<Phieu3Bang1Dong>().ToTable("Phieu3_Bang1Dong");
@@ -120,6 +133,11 @@ namespace DanhGiaAPI.Models
             modelBuilder.Entity<Phieu4GiaTri>().ToTable("Phieu4_GiaTri");
             modelBuilder.Entity<Phieu4Doan>().ToTable("Phieu4_Doan");
             modelBuilder.Entity<Phieu4DoanDiaDiem>().ToTable("Phieu4_DoanDiaDiem");
+
+            // Cùng lý do trên — tên bảng SQL có "_" (xem
+            // migration_ketquadanhgia_phanbo.sql) khác tên entity C#.
+            modelBuilder.Entity<KetQuaDanhGiaPhanBo>().ToTable("KetQuaDanhGia_PhanBo");
+            modelBuilder.Entity<KetQuaDanhGiaLoaiTru>().ToTable("KetQuaDanhGia_LoaiTru");
         }
     }
 }

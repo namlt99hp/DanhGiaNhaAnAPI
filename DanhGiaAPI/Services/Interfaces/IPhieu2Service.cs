@@ -35,6 +35,15 @@ namespace DanhGiaAPI.Services.Interfaces
         // Đồng bộ TrangThai từ IChuKyPhieuService.TrangThaiTongAsync
         Task<Phieu2DanhGia> DongBoTrangThaiAsync(int id);
 
+        // Thu hồi phiếu đang CHO_KY/DA_DUYET về lại NHAP để sửa — xem
+        // IPhieu1Service.ThuHoiAsync (cùng thiết kế). Phiếu 2 không có khái
+        // niệm "phòng ban đã lập" (NguoiDungPhieuQuyen không hard-code theo
+        // phòng ban cho PHIEU2, xem Phieu2Service.KiemTraQuyenDanhGiaAsync)
+        // nên không có tham số phongBanCuaNguoiGoi.
+        Task<Phieu2DanhGia> ThuHoiAsync(int id, int nguoiThuHoiId, bool laAdmin, string lyDo);
+
+        Task<List<Phieu2ThuHoiDto>> LichSuThuHoiAsync(int id, int? nhaThauCuaNguoiGoi, int? nguoiDungId, bool laAdmin);
+
         // Cập nhật ý kiến phản hồi nhà thầu
         Task<Phieu2ResponseDto> PhanHoiYKienNhaThauAsync(int id, Phieu2YKienNhaThauRequest request);
 

@@ -33,15 +33,17 @@ namespace DanhGiaAPI.Controllers
             _service = service;
         }
 
-        // GET api/KetQuaDanhGiaPhanBo?diaDiemNhaAnId=&idBuaAn=&tuNgay=&denNgay=
+        // GET api/KetQuaDanhGiaPhanBo?diaDiemNhaAnId=&idBuaAn=&tuNgay=&denNgay=&daCoGian=
+        // daCoGian: true = chỉ "Đã co giãn" (Tong != TongGoc), false = chỉ
+        // "Giữ nguyên" (Tong == TongGoc), bỏ trống = không lọc theo trạng thái.
         [HttpGet]
         public async Task<IActionResult> DanhSach(
             [FromQuery] int? diaDiemNhaAnId, [FromQuery] int? idBuaAn,
-            [FromQuery] DateTime? tuNgay, [FromQuery] DateTime? denNgay)
+            [FromQuery] DateTime? tuNgay, [FromQuery] DateTime? denNgay, [FromQuery] bool? daCoGian)
         {
             var denNgayThat = (denNgay ?? DateTime.Now).Date;
             var tuNgayThat = (tuNgay ?? denNgayThat.AddDays(-6)).Date;
-            return Ok(await _service.DanhSachAsync(diaDiemNhaAnId, idBuaAn, tuNgayThat, denNgayThat));
+            return Ok(await _service.DanhSachAsync(diaDiemNhaAnId, idBuaAn, tuNgayThat, denNgayThat, daCoGian));
         }
 
         // POST api/KetQuaDanhGiaPhanBo/tinh-lai
@@ -51,6 +53,26 @@ namespace DanhGiaAPI.Controllers
             var ngay = (request.Ngay ?? DateTime.Now).Date;
             var soDong = await _service.TinhLaiTheoNgayBuaAnAsync(ngay, request.ID_BuaAn);
             return Ok(new { soDongXuLy = soDong, ngay, idBuaAn = request.ID_BuaAn });
+        }
+
+        // POST api/KetQuaDanhGiaPhanBo/tinh-lai-khoang — nút "Phân bổ lại" ở
+        // KetQuaDanhGiaPhanBoPageV2, gọi theo đúng bộ lọc đang chọn trên màn
+        // search (khoảng ngày/bữa ăn/địa điểm). Giới hạn khoảng ngày TỐI ĐA 2
+        // NGÀY — mỗi ngày quét hết các bữa x địa điểm đang active, khoảng dài
+        // dễ quá tải DB (xác nhận nghiệp vụ 2026-10-19, xem
+        // 02. Phantich/modules/KetQuaDanhGiaPhanBo.md).
+        [HttpPost("tinh-lai-khoang")]
+        public async Task<IActionResult> TinhLaiKhoang([FromBody] KetQuaDanhGiaPhanBoTinhKhoangRequest request)
+        {
+            var tuNgay = request.TuNgay.Date;
+            var denNgay = request.DenNgay.Date;
+            if (denNgay < tuNgay)
+                return BadRequest(new { message = "Đến ngày phải lớn hơn hoặc bằng Từ ngày" });
+            if ((denNgay - tuNgay).Days > 1)
+                return BadRequest(new { message = "Khoảng thời gian tối đa 2 ngày" });
+
+            var ketQua = await _service.TinhLaiTheoKhoangAsync(tuNgay, denNgay, request.ID_BuaAn, request.DiaDiemNhaAnId);
+            return Ok(ketQua);
         }
     }
 }

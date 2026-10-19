@@ -139,18 +139,81 @@ namespace DanhGiaAPI.Services
             return soDongXuLy;
         }
 
-        public async Task<List<KetQuaDanhGiaPhanBoDanhSachItemDto>> DanhSachAsync(int? diaDiemNhaAnId, int? idBuaAn, DateTime tuNgay, DateTime denNgay)
+        public async Task<KetQuaDanhGiaPhanBoTinhKhoangResultDto> TinhLaiTheoKhoangAsync(
+            DateTime tuNgay, DateTime denNgay, int? idBuaAn, int? diaDiemNhaAnId)
+        {
+            tuNgay = tuNgay.Date;
+            denNgay = denNgay.Date;
+            var homNay = DateTime.Now.Date;
+
+            var diaDiemIds = diaDiemNhaAnId.HasValue
+                ? new List<int> { diaDiemNhaAnId.Value }
+                : (await _diaDiemNhaAnRepository.FindAsync(x => x.IsActive)).Select(x => x.ID).ToList();
+
+            // Chỉ xử lý 4 bữa thật Sáng..Đêm (CodeBuaAn "01".."04"), bỏ qua
+            // dòng "ALL" — khớp mapping ở TinhLaiAsync.
+            var buaAnIds = idBuaAn.HasValue
+                ? new List<int> { idBuaAn.Value }
+                : (await _buaAnRepository.GetAllAsync())
+                    .Where(b => int.TryParse(b.CodeBuaAn, out _))
+                    .Select(b => b.ID)
+                    .ToList();
+
+            var ketQua = new KetQuaDanhGiaPhanBoTinhKhoangResultDto();
+            if (diaDiemIds.Count == 0 || buaAnIds.Count == 0) return ketQua;
+
+            for (var ngay = tuNgay; ngay <= denNgay; ngay = ngay.AddDays(1))
+            {
+                foreach (var idBuaAnX in buaAnIds)
+                {
+                    if (ngay < homNay && await DaTinhDayDuAsync(ngay, idBuaAnX, diaDiemIds))
+                    {
+                        ketQua.SoToHopBoQua++;
+                        continue;
+                    }
+
+                    ketQua.TongDongGhi += await TinhLaiAsync(ngay, idBuaAnX, diaDiemIds);
+                    ketQua.SoToHopDaTinh++;
+                }
+            }
+
+            return ketQua;
+        }
+
+        // "Đã tính đủ" cho (Ngay, IdBuaAn) = mọi địa điểm trong diaDiemNhaAnIds
+        // đều đã có dòng KetQuaDanhGiaPhanBo với ComThucTe != null (đã có dữ
+        // liệu suất ăn thực tế, không phải "chưa sync"). Chỉ dùng để quyết
+        // định BỎ QUA đọc/tính lại cho NGÀY ĐÃ QUA — xem
+        // TinhLaiTheoKhoangAsync và interface.
+        private async Task<bool> DaTinhDayDuAsync(DateTime ngay, int idBuaAn, List<int> diaDiemNhaAnIds)
+        {
+            var hienCo = await _phanBoRepository.FindAsync(x =>
+                diaDiemNhaAnIds.Contains(x.DiaDiemNhaAnId) && x.Ngay == ngay && x.ID_BuaAn == idBuaAn && x.ComThucTe != null);
+            return hienCo.Select(x => x.DiaDiemNhaAnId).Distinct().Count() >= diaDiemNhaAnIds.Count;
+        }
+
+        public async Task<List<KetQuaDanhGiaPhanBoDanhSachItemDto>> DanhSachAsync(
+            int? diaDiemNhaAnId, int? idBuaAn, DateTime tuNgay, DateTime denNgay, bool? daCoGian = null)
         {
             var tu = tuNgay.Date;
             var den = denNgay.Date;
             var query = _phanBoRepository.Query().Where(x => x.Ngay >= tu && x.Ngay <= den);
             if (diaDiemNhaAnId.HasValue) query = query.Where(x => x.DiaDiemNhaAnId == diaDiemNhaAnId);
             if (idBuaAn.HasValue) query = query.Where(x => x.ID_BuaAn == idBuaAn);
+            // "Đã co giãn" = Tong (đã phân bổ) khác TongGoc (số liệu gốc) —
+            // khớp đúng điều kiện hiển thị Tag ở cột "Trạng thái" trên
+            // KetQuaDanhGiaPhanBoPageV2.tsx. "Giữ nguyên" = Tong == TongGoc.
+            if (daCoGian.HasValue)
+                query = daCoGian.Value ? query.Where(x => x.Tong != x.TongGoc) : query.Where(x => x.Tong == x.TongGoc);
 
+            // Mặc định: Ngày desc, rồi Bữa ăn desc — xác nhận nghiệp vụ
+            // 2026-10-19 (trước đây ưu tiên Địa điểm trước Bữa ăn).
+            // DiaDiemNhaAnId chỉ dùng làm tiêu chí phụ cuối để thứ tự ổn định
+            // giữa nhiều địa điểm trong cùng (Ngày, Bữa ăn).
             var ketQua = query
                 .OrderByDescending(x => x.Ngay)
+                .ThenByDescending(x => x.ID_BuaAn)
                 .ThenBy(x => x.DiaDiemNhaAnId)
-                .ThenBy(x => x.ID_BuaAn)
                 .ToList();
 
             var tenBuaAnTheoId = (await _buaAnRepository.GetAllAsync())

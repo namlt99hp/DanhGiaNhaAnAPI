@@ -20,7 +20,24 @@ namespace DanhGiaAPI.Services.Interfaces
 
         // Danh sách để rà soát số liệu GỐC (Diem1Goc..5Goc/TongGoc) vs số ĐÃ
         // PHÂN BỔ (Diem1..5/Tong) — dùng cho trang màn hình rà soát, xem
-        // 02. Phantich/modules/KetQuaDanhGiaPhanBo.md.
-        Task<List<KetQuaDanhGiaPhanBoDanhSachItemDto>> DanhSachAsync(int? diaDiemNhaAnId, int? idBuaAn, DateTime tuNgay, DateTime denNgay);
+        // 02. Phantich/modules/KetQuaDanhGiaPhanBo.md. Sắp xếp mặc định Ngày
+        // desc, Bữa ăn desc. daCoGian: true = chỉ lấy dòng Tong != TongGoc
+        // ("Đã co giãn"), false = chỉ lấy Tong == TongGoc ("Giữ nguyên"),
+        // null = không lọc theo trạng thái.
+        Task<List<KetQuaDanhGiaPhanBoDanhSachItemDto>> DanhSachAsync(
+            int? diaDiemNhaAnId, int? idBuaAn, DateTime tuNgay, DateTime denNgay, bool? daCoGian = null);
+
+        // Tính lại (upsert) cho CẢ KHOẢNG ngày [tuNgay, denNgay] — dùng cho nút
+        // "Phân bổ lại" ở màn KetQuaDanhGiaPhanBoPageV2 (gọi tay theo đúng bộ
+        // lọc đang chọn trên màn hình). idBuaAn null = tất cả 4 bữa thật
+        // (Sáng..Đêm), diaDiemNhaAnId null = tất cả địa điểm đang IsActive.
+        // Với mỗi (Ngay, IdBuaAn): NGÀY ĐÃ QUA (không phải hôm nay) VÀ đã có
+        // đủ dòng KetQuaDanhGiaPhanBo (ComThucTe != null) cho hết các địa
+        // điểm đang xét -> BỎ QUA, không đọc/tính lại (tối ưu khi quét nhiều
+        // ngày/bữa/địa điểm). Hôm nay LUÔN tính lại (không bỏ qua) vì
+        // DuLieuCom còn có thể tiếp tục sync trong ngày — xem
+        // "Thời điểm tính" ở 02. Phantich/modules/KetQuaDanhGiaPhanBo.md.
+        Task<KetQuaDanhGiaPhanBoTinhKhoangResultDto> TinhLaiTheoKhoangAsync(
+            DateTime tuNgay, DateTime denNgay, int? idBuaAn, int? diaDiemNhaAnId);
     }
 }
